@@ -107,6 +107,90 @@
   border-color: #2b59ff;
 }
 
+/* Meeko-style drafting paper grid backgrounds */
+.bg-draft-grid {
+  background-color: #fff9f6;
+  background-image: 
+    linear-gradient(to right, rgba(235, 215, 205, 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(235, 215, 205, 0.5) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.bg-draft-grid-subtle {
+  background-image: 
+    linear-gradient(to right, rgba(227, 230, 235, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(227, 230, 235, 0.6) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Liquid Glass Pill Navbar (Framer Liquid Glass aesthetic) */
+.liquid-glass-navbar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(238, 242, 248, 0.62) 100%);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 
+    inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 2px 0 rgba(0, 0, 0, 0.05),
+    0 16px 40px -8px rgba(0, 0, 0, 0.12),
+    0 4px 14px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Embossed Squircle Logo Bevel */
+.liquid-logo-box {
+  background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 1),
+    0 2px 6px -1px rgba(0, 0, 0, 0.12),
+    0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Glossy Black CTA Pill matching Framer screenshot */
+.liquid-cta-btn {
+  background: linear-gradient(180deg, #1c1f26 0%, #0d0f12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.35),
+    0 4px 12px -2px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liquid-cta-btn:hover {
+  transform: scale(1.02);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.45),
+    0 6px 16px -2px rgba(0, 0, 0, 0.32);
+}
+
+.liquid-cta-btn:active {
+  transform: scale(0.98);
+}
+
+/* Scalloped / Organic cloud frame like Meeko portrait */
+.meeko-cloud-frame {
+  border-radius: 60px 20px 60px 20px;
+  box-shadow: 0 20px 40px -15px rgba(220, 100, 60, 0.15);
+}
+
+/* Hand-drawn underline / pill accent */
+.editorial-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  border: 1.5px solid #15171c;
+  background-color: #ffffff;
+  font-weight: 700;
+  color: #15171c;
+  transition: all 0.2s ease;
+}
+
+.editorial-pill:hover {
+  transform: scale(1.04);
+}
+
 /* Monospace Terminal Cursor */
 @keyframes blink {
 

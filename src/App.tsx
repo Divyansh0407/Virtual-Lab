@@ -10,7 +10,6 @@ import { FacultyGradingQueue } from './components/FacultyGradingQueue';
 import { FacultyLabAuthoring } from './components/FacultyLabAuthoring';
 import { LiveSessionMonitor } from './components/LiveSessionMonitor';
 import { AdminClusterDashboard } from './components/AdminClusterDashboard';
-import { ArchitectureExplorer } from './components/ArchitectureExplorer';
 import { LandingPage } from './components/LandingPage';
 import { Lock, LogIn, Sparkles } from 'lucide-react';
 
@@ -25,7 +24,7 @@ const MainLayout: React.FC = () => {
   } = useApp();
 
   // If user is not authenticated and tries to access protected tab, fall back to landing page
-  const isProtectedTab = activeTab !== 'landing' && activeTab !== 'architecture';
+  const isProtectedTab = activeTab !== 'landing';
   const shouldRenderLanding = !isAuthenticated && isProtectedTab;
 
   return (
@@ -74,7 +73,6 @@ const MainLayout: React.FC = () => {
             {activeTab === 'authoring' && <FacultyLabAuthoring />}
             {activeTab === 'proctor' && <LiveSessionMonitor />}
             {activeTab === 'admin' && <AdminClusterDashboard />}
-            {activeTab === 'architecture' && <ArchitectureExplorer />}
           </>
         )}
       </main>
@@ -93,9 +91,6 @@ const MainLayout: React.FC = () => {
           <div className="flex items-center space-x-6 text-xs font-semibold">
             <button onClick={() => setActiveTab('landing')} className="hover:text-[#15171c]">
               Product Overview
-            </button>
-            <button onClick={() => setActiveTab('architecture')} className="hover:text-[#15171c]">
-              System Architecture
             </button>
             <span className="text-gray-300">|</span>
             <span className="text-[#6b7382] font-mono">React • Vite • Tailwind • TypeScript</span>

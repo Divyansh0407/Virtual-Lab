@@ -94,123 +94,331 @@ export const LandingPage: React.FC = () => {
 
   return (
     <div className="space-y-24 py-6">
-      {/* 1. HERO SECTION */}
-      <section className="relative text-center max-w-4xl mx-auto space-y-6 pt-4">
-        {/* Floating Decorative Badges matching Framer polish */}
-        <div className="hidden xl:flex absolute -left-16 top-16 animate-float items-center space-x-2.5 px-3.5 py-2 rounded-2xl bg-white/95 backdrop-blur-sm border border-[#e3e6eb] shadow-framer text-xs font-semibold text-[#15171c] z-10 hover-lift">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping-slow"></div>
-          <span>Rootless UID 1001 • cgroup v2</span>
-        </div>
+      {/* 1. MEEKO-STYLE EDITORIAL SPLIT HERO SECTION */}
+      <section className="max-w-6xl mx-auto border border-[#e3e6eb] bg-white rounded-3xl overflow-hidden shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-12">
+          {/* Left Column: Bold Typography & Action Controls */}
+          <div className="lg:col-span-7 p-8 sm:p-12 lg:p-14 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#e3e6eb] bg-white space-y-8">
+            <div className="space-y-5">
+              {/* Meeko Top Greeting Eyebrow */}
+              <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#f4f5f7] border border-[#e3e6eb] text-[11px] font-bold uppercase tracking-wider text-[#15171c]">
+                <span className="w-2 h-2 rounded-full bg-[#2b59ff] animate-ping-slow"></span>
+                <span>HI! WE ARE VIRTUALLAB</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-[#6b7382]">ACADEMIC CLOUD 2.4</span>
+              </div>
 
-        <div className="hidden xl:flex absolute -right-16 top-24 animate-float-gentle items-center space-x-2.5 px-3.5 py-2 rounded-2xl bg-white/95 backdrop-blur-sm border border-[#e3e6eb] shadow-framer text-xs font-semibold text-[#15171c] z-10 hover-lift">
-          <Sparkles className="w-4 h-4 text-[#2b59ff]" />
-          <span>AI Advisory Rubrics Active</span>
-        </div>
-
-        {/* Announcement Pill matching Ondrel with hover scale */}
-        <div
-          onClick={() => setActiveTab('architecture')}
-          className="group inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-white border border-[#e3e6eb] text-xs font-semibold text-[#15171c] shadow-sm hover:border-[#2b59ff] hover:shadow-glow-sm cursor-pointer transition-all duration-300 hover:scale-[1.02] animate-fade-in-down"
-        >
-          <span className="w-2 h-2 rounded-full bg-[#2b59ff] animate-ping-slow"></span>
-          <span>New VirtualLab 2.4 drafts rubric feedback and verifies container isolation</span>
-          <ArrowRight className="w-3.5 h-3.5 text-[#2b59ff] transition-transform duration-200 group-hover:translate-x-1" />
-        </div>
-
-        {/* Big Bold Headline */}
-        <h1 className="text-4xl sm:text-6xl font-black text-[#15171c] tracking-tight leading-[1.1] animate-fade-in">
-          The cloud laboratory platform for universities that ship.
-        </h1>
-
-        {/* Subtitle */}
-        <p className="text-base sm:text-lg text-[#6b7382] max-w-2xl mx-auto leading-relaxed animate-fade-in">
-          Practical computing labs, isolated container workspaces and reproducible evaluation in one calm platform. Everyone learns by doing, and nobody has to debug local setup.
-        </p>
-
-        {/* Action CTAs */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-          {!isAuthenticated ? (
-            <>
-              <button
-                onClick={() => setAuthModalOpen('signup')}
-                className="group w-full sm:w-auto px-6 py-3 rounded-xl bg-[#15171c] hover:bg-[#252830] text-white font-semibold text-xs sm:text-sm shadow-md transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
-              >
-                <span>Create Student / Faculty Account</span>
-                <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" />
-              </button>
-
-              <button
-                onClick={() => setAuthModalOpen('login')}
-                className="group w-full sm:w-auto px-6 py-3 rounded-xl bg-white hover:bg-[#f4f5f7] border border-[#e3e6eb] text-[#15171c] font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
-              >
-                <LogIn className="w-4 h-4 text-[#2b59ff] transition-transform duration-200 group-hover:-translate-x-0.5" />
-                <span>Sign In with University ID</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  if (currentUser.role === 'student') {
-                    startLabSession('lab-linux-perm');
-                  } else if (currentUser.role === 'faculty') {
-                    setActiveTab('authoring');
-                  } else {
-                    setActiveTab('admin');
-                  }
-                }}
-                className="group w-full sm:w-auto px-6 py-3 rounded-xl bg-[#15171c] hover:bg-[#252830] text-white font-semibold text-xs sm:text-sm shadow-md transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
-              >
-                <Play className="w-4 h-4 fill-current transition-transform duration-200 group-hover:scale-110" />
-                <span>
-                  {currentUser.role === 'student' ? 'Start interactive lab' : currentUser.role === 'faculty' ? 'Author New Lab' : 'Fleet Console'}
+              {/* Bold Editorial Headline with Outlined Pill Badge */}
+              <h1 className="text-4xl sm:text-6xl font-black text-[#15171c] tracking-tight leading-[1.08]">
+                Turning bold <br />
+                labs forward. <br />
+                We shape them with <br />
+                <span className="inline-flex items-center mx-1 my-1 px-4 py-1 rounded-full border-2 border-[#15171c] font-black text-2xl sm:text-4xl tracking-tight relative -rotate-1 bg-[#fff6f0] shadow-sm hover:rotate-0 transition-transform cursor-default">
+                  impact
+                  <span className="ml-1.5 text-amber-500 text-lg">✦</span>
                 </span>
-              </button>
+              </h1>
 
-              <button
-                onClick={() => {
-                  if (currentUser.role === 'student') {
-                    setActiveTab('dashboard');
-                  } else if (currentUser.role === 'faculty') {
-                    setActiveTab('grading');
-                  } else {
-                    setActiveTab('admin');
-                  }
-                }}
-                className="group w-full sm:w-auto px-6 py-3 rounded-xl bg-white hover:bg-[#f4f5f7] border border-[#e3e6eb] text-[#15171c] font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
-              >
-                <Award className="w-4 h-4 text-amber-500 transition-transform duration-200 group-hover:rotate-12" />
-                <span>Open {currentUser.role === 'student' ? 'My Practicals' : currentUser.role === 'faculty' ? 'Grading Studio' : 'Admin'}</span>
-              </button>
-            </>
-          )}
+              {/* Clean Subtitle */}
+              <p className="text-sm sm:text-base text-[#6b7382] leading-relaxed max-w-lg">
+                Practical computing labs, isolated container workspaces, and reproducible evaluation in one calm academic platform. Everyone learns by doing, and nobody has to debug local setup.
+              </p>
+            </div>
+
+            {/* Action CTAs */}
+            <div className="space-y-4 pt-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {!isAuthenticated ? (
+                  <>
+                    <button
+                      onClick={() => setAuthModalOpen('signup')}
+                      className="group px-6 py-3.5 rounded-full bg-[#15171c] hover:bg-[#252830] text-white font-semibold text-xs sm:text-sm shadow-md transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
+                    >
+                      <span>Create Student / Faculty Account</span>
+                      <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" />
+                    </button>
+
+                    <button
+                      onClick={() => setAuthModalOpen('login')}
+                      className="group px-6 py-3.5 rounded-full bg-white hover:bg-[#f4f5f7] border border-[#15171c] text-[#15171c] font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
+                    >
+                      <LogIn className="w-4 h-4 text-[#2b59ff] transition-transform duration-200 group-hover:-translate-x-0.5" />
+                      <span>Sign In with University ID</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (currentUser.role === 'student') {
+                          startLabSession('lab-linux-perm');
+                        } else if (currentUser.role === 'faculty') {
+                          setActiveTab('authoring');
+                        } else {
+                          setActiveTab('admin');
+                        }
+                      }}
+                      className="group px-6 py-3.5 rounded-full bg-[#15171c] hover:bg-[#252830] text-white font-semibold text-xs sm:text-sm shadow-md transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
+                    >
+                      <Play className="w-4 h-4 fill-current transition-transform duration-200 group-hover:scale-110" />
+                      <span>
+                        {currentUser.role === 'student' ? 'Start interactive lab' : currentUser.role === 'faculty' ? 'Author New Lab' : 'Fleet Console'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (currentUser.role === 'student') {
+                          setActiveTab('dashboard');
+                        } else if (currentUser.role === 'faculty') {
+                          setActiveTab('grading');
+                        } else {
+                          setActiveTab('admin');
+                        }
+                      }}
+                      className="group px-6 py-3.5 rounded-full bg-white hover:bg-[#f4f5f7] border border-[#15171c] text-[#15171c] font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 btn-tactile hover-lift flex items-center justify-center space-x-2"
+                    >
+                      <Award className="w-4 h-4 text-amber-500 transition-transform duration-200 group-hover:rotate-12" />
+                      <span>Open {currentUser.role === 'student' ? 'My Practicals' : currentUser.role === 'faculty' ? 'Grading Studio' : 'Admin'}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Bottom Feature Badges */}
+              {!isAuthenticated ? (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#6b7382] pt-2">
+                  <span className="flex items-center space-x-1.5 font-medium">
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Dedicated student workspace</span>
+                  </span>
+                  <span>•</span>
+                  <span className="flex items-center space-x-1.5 font-medium">
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Rootless UID 1001 container</span>
+                  </span>
+                  <span>•</span>
+                  <span className="flex items-center space-x-1.5 font-medium">
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Zero local install required</span>
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-[#6b7382]">
+                  Authenticated as <span className="font-bold text-[#15171c]">{currentUser.name}</span> ({currentUser.role}) · <button onClick={() => setAuthModalOpen('login')} className="text-[#2b59ff] hover:underline font-semibold">Switch Account</button>
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Drafting Grid Canvas with Organic Scalloped Frame & Floating Stickers */}
+          <div className="lg:col-span-5 bg-draft-grid p-6 sm:p-10 flex flex-col items-center justify-center relative min-h-[460px] overflow-hidden">
+            {/* Floating Sticker 1: Pixel Perfection / Rootless Container with pencil marker */}
+            <div className="absolute top-6 left-6 -rotate-3 hidden sm:flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white border border-[#15171c] shadow-sm text-xs font-bold text-[#15171c] hover:scale-105 transition-transform z-20">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping-slow"></span>
+              <span>Rootless UID 1001</span>
+              <span className="text-[10px] text-gray-400">✏️</span>
+            </div>
+
+            {/* Floating Sticker 2: Less But Better / AI Advisory Rubrics with peace symbol */}
+            <div className="absolute top-10 right-6 rotate-3 hidden sm:flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white border border-[#15171c] shadow-sm text-xs font-bold text-[#15171c] hover:scale-105 transition-transform z-20">
+              <Sparkles className="w-3.5 h-3.5 text-[#2b59ff]" />
+              <span>Less Setup, Better Labs</span>
+              <span>✌️</span>
+            </div>
+
+            {/* Organic Scalloped Frame Container */}
+            <div className="relative group my-auto">
+              <div className="w-56 h-56 sm:w-64 sm:h-64 rounded-[42px] overflow-hidden border-4 border-white shadow-2xl relative bg-white transform transition-transform duration-300 group-hover:scale-[1.02]">
+                <img
+                  src="/hacker-cat.jpg"
+                  alt="VirtualLab Student Workspace"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent flex flex-col justify-end p-4 text-white">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 flex items-center space-x-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>14 Containers Active</span>
+                  </span>
+                  <p className="text-xs font-bold mt-0.5">Lab 04: Linux Permissions</p>
+                  <p className="text-[10px] text-gray-300 font-mono">UID 1001 · cgroup v2</p>
+                </div>
+              </div>
+
+              {/* Floating Mini Status Chip Bottom Right */}
+              <div className="absolute -bottom-4 -right-2 rotate-2 bg-white px-3.5 py-2 rounded-2xl border border-[#15171c] shadow-md flex items-center space-x-2 text-xs font-bold text-[#15171c] z-20">
+                <span className="w-2 h-2 rounded-full bg-[#2b59ff]"></span>
+                <span>chmod 640 report.txt</span>
+                <span className="text-[10px] font-mono text-emerald-600 font-bold">✓ PASS</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. MEEKO CONTINUOUS MARQUEE TICKER (Border Top & Bottom) */}
+      <div className="border-y border-[#e3e6eb] bg-white py-3.5 overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8">
+        <div className="flex space-x-8 animate-marquee whitespace-nowrap text-xs font-extrabold uppercase tracking-widest text-[#15171c]/75">
+          {[
+            'Systems & OS Labs', '—', 'Rootless Containers', '—', 'Automated Rubrics', '—',
+            'Non-Root UID 1001', '—', 'cgroup v2 Quotas', '—', 'In-Browser POSIX Shell', '—',
+            'SHA-256 Snapshots', '—', 'Zero Local Setup', '—',
+            'Systems & OS Labs', '—', 'Rootless Containers', '—', 'Automated Rubrics', '—',
+            'Non-Root UID 1001', '—', 'cgroup v2 Quotas', '—', 'In-Browser POSIX Shell', '—',
+            'SHA-256 Snapshots', '—', 'Zero Local Setup', '—'
+          ].map((item, idx) => (
+            <span key={idx} className={item === '—' ? 'text-gray-300 font-normal' : 'hover:text-[#2b59ff] transition-colors cursor-default'}>
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. VALUE-FOCUSED WORK THAT DELIVERS (Meeko 3-Column Bento Cards) */}
+      <section className="max-w-6xl mx-auto space-y-10">
+        {/* Split Section Header */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-end pb-4 border-b border-[#e3e6eb]">
+          <div className="md:col-span-6">
+            <h2 className="text-3xl sm:text-5xl font-black text-[#15171c] tracking-tight leading-tight">
+              Value-focused <br />
+              work that delivers.
+            </h2>
+          </div>
+          <div className="md:col-span-6 md:text-right">
+            <p className="text-sm sm:text-base text-[#6b7382] max-w-md ml-auto leading-relaxed">
+              The practical computing environments we provision are meticulously crafted and securely isolated to cater specifically to computer science curricula.
+            </p>
+          </div>
         </div>
 
-        {!isAuthenticated ? (
-          <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-[#6b7382]">
-            <span className="flex items-center space-x-1.5 transition-transform hover:scale-105 duration-200">
-              <Check className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Dedicated student workspace</span>
-            </span>
-            <span>•</span>
-            <span className="flex items-center space-x-1.5 transition-transform hover:scale-105 duration-200">
-              <Check className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Non-root container isolation</span>
-            </span>
-            <span>•</span>
-            <span className="flex items-center space-x-1.5 transition-transform hover:scale-105 duration-200">
-              <Check className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Academic ID & credentials login</span>
-            </span>
+        {/* 3 Column Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1 */}
+          <div className="rounded-2xl border border-[#e3e6eb] bg-white p-7 space-y-5 shadow-sm hover:border-[#15171c] transition-all hover-lift">
+            <div className="inline-flex px-3.5 py-1 rounded-full border border-[#15171c] text-xs font-bold text-[#15171c] bg-white">
+              Systems & Linux
+            </div>
+            <ul className="space-y-3 text-xs sm:text-[13px] text-[#6b7382] font-medium">
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span className="text-[#15171c]">Non-root permission labs (chmod / chown)</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Process management & signals (kill / htop)</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Storage mounts & persistent volume staging</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Real-time bash syntax verification</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Kernel namespace & cgroup v2 sandboxes</span>
+              </li>
+            </ul>
           </div>
-        ) : (
-          <p className="text-xs text-[#6b7382]">
-            Authenticated as <span className="font-bold text-[#15171c]">{currentUser.name}</span> ({currentUser.role}) · <button onClick={() => setAuthModalOpen('login')} className="text-[#2b59ff] hover:underline font-semibold">Switch Account</button>
-          </p>
-        )}
 
-        {/* 2. MOCK APP CANVAS (Interactive Preview) */}
-        <div className="mt-12 text-left rounded-2xl bg-white border border-[#e3e6eb] shadow-xl overflow-hidden">
+          {/* Card 2 */}
+          <div className="rounded-2xl border border-[#e3e6eb] bg-white p-7 space-y-5 shadow-sm hover:border-[#15171c] transition-all hover-lift">
+            <div className="inline-flex px-3.5 py-1 rounded-full border border-[#15171c] text-xs font-bold text-[#15171c] bg-white">
+              DevOps & Cloud
+            </div>
+            <ul className="space-y-3 text-xs sm:text-[13px] text-[#6b7382] font-medium">
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span className="text-[#15171c]">Containerization with Podman & Docker</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>CI/CD automated grading test suites</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Strict iptables firewall egress barriers</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Multi-tier microservice network debug</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Hardware resource constraints (RAM/CPU)</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* Card 3 */}
+          <div className="rounded-2xl border border-[#e3e6eb] bg-white p-7 space-y-5 shadow-sm hover:border-[#15171c] transition-all hover-lift">
+            <div className="inline-flex px-3.5 py-1 rounded-full border border-[#15171c] text-xs font-bold text-[#15171c] bg-white">
+              AI & Rubrics
+            </div>
+            <ul className="space-y-3 text-xs sm:text-[13px] text-[#6b7382] font-medium">
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span className="text-[#15171c]">Advisory rubric feedback with LLM checks</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>100% instructor grade override authority</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Abstract syntax tree plagiarism detection</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Immutable SHA-256 snapshot freezes</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#15171c]"></span>
+                <span>Instant export to Canvas, Blackboard & LMS</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Bottom Action CTA */}
+        <div className="text-center pt-2 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-[#6b7382]">
+            Let's create results together.
+          </p>
+          <button
+            onClick={() => {
+              if (isAuthenticated) {
+                startLabSession('lab-linux-perm');
+              } else {
+                setAuthModalOpen('signup');
+              }
+            }}
+            className="px-6 py-2.5 rounded-full bg-white hover:bg-[#15171c] hover:text-white border border-[#15171c] text-xs font-bold text-[#15171c] shadow-sm transition-all duration-200 hover-lift inline-flex items-center space-x-2"
+          >
+            <span>Start a Lab Practical</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </section>
+
+      {/* 4. MOCK APP CANVAS (Interactive Preview) */}
+      <section className="max-w-6xl mx-auto space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-2 border-b border-[#e3e6eb]">
+          <div>
+            <div className="text-xs uppercase font-bold text-[#2b59ff] tracking-wider">
+              Live Preview
+            </div>
+            <h3 className="text-2xl font-black text-[#15171c] tracking-tight">
+              Interactive Workbench Canvas
+            </h3>
+          </div>
+          <p className="text-xs text-[#6b7382]">
+            Simulated rootless container session with live bash execution
+          </p>
+        </div>
+
+        <div className="text-left rounded-2xl bg-white border border-[#e3e6eb] shadow-sm overflow-hidden">
           {/* Browser Chrome Header */}
           <div className="bg-[#f4f5f7] px-4 py-3 border-b border-[#e3e6eb] flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -600,23 +808,30 @@ export const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* 6. TESTIMONIALS SECTION */}
-      <section className="max-w-6xl mx-auto space-y-8">
-        <div className="text-center max-w-2xl mx-auto">
-          <div className="text-xs uppercase font-bold text-[#2b59ff] tracking-wider">
-            Academic Community
+      {/* 6. MEEKO-STYLE TESTIMONIALS SECTION */}
+      <section className="max-w-6xl mx-auto rounded-3xl border border-[#e3e6eb] bg-draft-grid p-8 sm:p-12 space-y-8">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-[#e3e6eb]">
+          <div>
+            <div className="text-xs uppercase font-bold text-[#2b59ff] tracking-wider mb-1">
+              Academic Testimonials
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-black text-[#15171c] tracking-tight">
+              Loved by professors and students alike.
+            </h2>
           </div>
-          <h2 className="text-3xl font-extrabold text-[#15171c] tracking-tight">
-            Loved by professors and students alike.
-          </h2>
+          <div className="flex items-center space-x-1.5 text-amber-500 font-bold text-sm bg-white px-3.5 py-1.5 rounded-full border border-[#e3e6eb] shadow-sm">
+            <span>★★★★★</span>
+            <span className="text-[#15171c] ml-1.5 text-xs font-semibold">4.9/5 from 4,000+ sessions</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-6 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 framer-card hover-lift">
-            <p className="text-xs sm:text-sm text-[#15171c] leading-relaxed italic">
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 hover:border-[#15171c] transition-all hover-lift">
+            <div className="text-amber-500 text-xs tracking-wider">★★★★★</div>
+            <p className="text-xs sm:text-[13px] text-[#15171c] leading-relaxed italic">
               "We used to lose the first two weeks of our Operating Systems practicals resolving Mac M1/M2 compiler mismatches and broken WSL installations. With VirtualLab, every student starts in a standardized, reproducible Ubuntu container in five seconds."
             </p>
-            <div className="flex items-center space-x-3 pt-2 border-t border-[#e3e6eb]">
+            <div className="flex items-center space-x-3 pt-3 border-t border-[#e3e6eb]">
               <img
                 src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=80&auto=format&fit=crop&q=80"
                 alt="Garvit Dohare"
@@ -629,11 +844,12 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 framer-card hover-lift">
-            <p className="text-xs sm:text-sm text-[#15171c] leading-relaxed italic">
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 hover:border-[#15171c] transition-all hover-lift">
+            <div className="text-amber-500 text-xs tracking-wider">★★★★★</div>
+            <p className="text-xs sm:text-[13px] text-[#15171c] leading-relaxed italic">
               "Having the automated check run immediately after I set my octal permissions gave me real confidence that my file state was correct before submitting. Plus the browser terminal feels just like native Bash."
             </p>
-            <div className="flex items-center space-x-3 pt-2 border-t border-[#e3e6eb]">
+            <div className="flex items-center space-x-3 pt-3 border-t border-[#e3e6eb]">
               <img
                 src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=80&auto=format&fit=crop&q=80"
                 alt="Divyansh Sharma"
@@ -646,11 +862,12 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 framer-card hover-lift">
-            <p className="text-xs sm:text-sm text-[#15171c] leading-relaxed italic">
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-[#e3e6eb] shadow-sm space-y-4 hover:border-[#15171c] transition-all hover-lift">
+            <div className="text-amber-500 text-xs tracking-wider">★★★★★</div>
+            <p className="text-xs sm:text-[13px] text-[#15171c] leading-relaxed italic">
               "From an infrastructure perspective, keeping untrusted student workloads completely isolated from application databases while enforcing cgroup limits eliminated server crashes during peak submission nights."
             </p>
-            <div className="flex items-center space-x-3 pt-2 border-t border-[#e3e6eb]">
+            <div className="flex items-center space-x-3 pt-3 border-t border-[#e3e6eb]">
               <img
                 src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=80&auto=format&fit=crop&q=80"
                 alt="Akshita"
@@ -783,7 +1000,7 @@ export const LandingPage: React.FC = () => {
               </ul>
             </div>
             <button
-              onClick={() => setActiveTab('architecture')}
+              onClick={() => setAuthModalOpen('signup')}
               className="mt-6 w-full py-2.5 rounded-xl bg-[#f4f5f7] hover:bg-gray-200 text-[#15171c] font-semibold text-xs transition-all duration-200 btn-tactile hover-lift"
             >
               Contact solutions team
@@ -802,7 +1019,7 @@ export const LandingPage: React.FC = () => {
             Answers before you ask.
           </h2>
           <p className="text-sm text-[#6b7382]">
-            Everything you need to know about the architecture, security isolation, and grading rules.
+            Everything you need to know about security isolation, container environments, and grading rules.
           </p>
         </div>
 
@@ -853,12 +1070,6 @@ export const LandingPage: React.FC = () => {
               className="px-6 py-3 rounded-xl bg-white text-[#15171c] font-bold text-xs sm:text-sm hover:bg-gray-100 transition-all duration-200 shadow-md btn-tactile hover-lift"
             >
               {isAuthenticated ? 'Launch Interactive Lab' : 'Sign In to Interactive Lab'}
-            </button>
-            <button
-              onClick={() => setActiveTab('architecture')}
-              className="px-6 py-3 rounded-xl bg-gray-800 text-white font-semibold text-xs sm:text-sm border border-gray-700 hover:bg-gray-700 transition-all duration-200 btn-tactile hover-lift"
-            >
-              Read Architecture Blueprint
             </button>
           </div>
         </div>
