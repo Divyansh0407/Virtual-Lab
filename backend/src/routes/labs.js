@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireSessionOwnership } from '../middleware/auth.js';
 import { sessionManager } from '../sessionManager.js';
+import { dynamoDBService } from '../services/dynamoDBService.js';
 import { docker } from '../docker.js';
 import { config } from '../config.js';
 
@@ -109,6 +110,37 @@ labsRouter.delete('/:id', requireAuth, requireSessionOwnership, async (req, res,
     res.status(200).json({
       success: true,
       message: `Lab container '${session.containerName}' stopped and removed from host.`
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/labs/:id/history
+ * Internal/Authorized endpoint to query session command logs from DynamoDB.
+ *
+ * Security Notice:
+ * In this college prototype, user identity headers (x-user-id) are accepted for development.
+ * In production, this route should be restricted to authenticated faculty/admin roles
+ * via signed JWTs or session cookies.
+ */
+labsRouter.get('/:id/history', requireAuth, requireSessionOwnership, async (req, res, next) => {
+  try {
+    const session = req.session;
+    const { limit = '100', nextToken } = req.query;
+
+    const history = await dynamoDBService.getSessionHistory(session.id, {
+      limit: parseInt(limit, 10),
+      nextToken: nextToken ? String(nextToken) : null
+    });
+
+    res.status(200).json({
+      success: true,
+      sessionId: session.id,
+      studentId: session.studentId,
+      studentName: session.studentName,
+      ...history
     });
   } catch (err) {
     next(err);

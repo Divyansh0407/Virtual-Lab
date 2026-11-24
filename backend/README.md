@@ -1,8 +1,8 @@
-# VirtualLab - AWS EC2 Backend Service
+# VirtualLab - AWS EC2 Backend Service (Phase 1 & Phase 2)
 
 ## Overview
 
-VirtualLab is a cloud-based interactive Linux laboratory platform designed for universities. This backend service runs directly on an **AWS EC2 instance (Ubuntu 24.04 LTS)** with Docker Engine installed. It manages isolated student container sessions and exposes bidirectional WebSocket terminal streams powered by `@xterm/xterm` and `Dockerode`.
+VirtualLab is a cloud-based interactive Linux laboratory platform designed for universities. This backend service runs directly on an **AWS EC2 instance (Ubuntu 24.04 LTS)** with Docker Engine installed. It manages isolated student container sessions, exposes bidirectional WebSocket terminal streams powered by `@xterm/xterm` and `Dockerode`, and persists all session activity and Linux command history to **AWS DynamoDB** via the EC2 instance role (`VirtualLabEC2Role`).
 
 > [!WARNING]
 > **Academic Prototype Security Disclaimer**:
@@ -10,7 +10,7 @@ VirtualLab is a cloud-based interactive Linux laboratory platform designed for u
 
 ---
 
-## Architecture
+## Architecture & Data Flow
 
 ```
 +-------------------------------------------------------------+
@@ -25,224 +25,224 @@ VirtualLab is a cloud-based interactive Linux laboratory platform designed for u
 |               AWS EC2 (Ubuntu 24.04 LTS)                    |
 |                                                             |
 |  VirtualLab Express & WebSocket Server (127.0.0.1:5000)     |
-|   - GET  /api/health                                        |
+|   - GET  /api/health (Includes Docker & DynamoDB metrics)   |
 |   - POST /api/labs/launch                                   |
 |   - GET  /api/labs/:id/status                               |
+|   - GET  /api/labs/:id/history (Paginated command logs)     |
 |   - DELETE /api/labs/:id                                    |
 |   - WS   /ws/terminal/:id?ticket=...                        |
 |                                                             |
 |  Dockerode (Connected via /var/run/docker.sock)             |
-|                                                             |
-|  Docker Engine:                                             |
 |   - Container 1: virtuallab-linux:1.0 (student1)            |
 |   - Container 2: virtuallab-linux:1.0 (student2)            |
-|   (Max 2 concurrent containers, 1 per student)              |
+|     (Network: none | PROMPT_COMMAND="history -a")           |
+|                                                             |
+|  Real-time Command Stream (tail -F /tmp/.vl_history)        |
+|   -> Redaction & Bounded Queue Worker (with retries)        |
++------------------------------+------------------------------+
+                               |
+             IAM Instance Role | VirtualLabEC2Role
+             Default Chain     | (No AWS keys needed)
+                               v
++-------------------------------------------------------------+
+|               AWS DynamoDB (ap-south-1)                     |
+|                                                             |
+|  Table: VirtualLabCommandLogs                               |
+|   - Partition Key: sessionId (String)                       |
+|   - Sort Key:      eventId   (String: ISO_seq_uuid)         |
+|   - Event Types:   COMMAND_HISTORY, LAB_STARTED, LAB_STOPPED|
 +-------------------------------------------------------------+
 ```
 
 ---
 
-## Prerequisites & Requirements
+## Phase 2: DynamoDB Command Logging Architecture
 
-- **Operating System**: Ubuntu 24.04 LTS (AWS EC2)
-- **Node.js**: `>= 18.0.0` (Node 20.x LTS recommended)
-- **Docker Engine**: Installed and running with user `ubuntu` in the `docker` group
-- **Docker Image**: `virtuallab-linux:1.0` built and available locally on EC2
-- **Network Boundary**: Bound strictly to `127.0.0.1:5000` (accessed via SSH port forwarding, never exposed publicly)
+### 1. Zero Credential Requirement (IAM Role)
+The EC2 instance is assigned the IAM Role `VirtualLabEC2Role` with permissions:
+- `dynamodb:PutItem`
+- `dynamodb:GetItem`
+- `dynamodb:Query`
+- `dynamodb:DescribeTable`
 
----
+The AWS SDK v3 client initializes with `{ region: config.awsRegion }`, naturally resolving credentials from the **EC2 Instance Metadata Service (IMDS)** via the default credential provider chain. **No AWS access keys or secrets are ever stored, configured, or committed.**
 
-## Container Security & Resource Constraints
+### 2. Shell-Level Command Capture Mechanism
+Rather than capturing noisy raw WebSocket keystrokes (which include backspaces, arrow-key escape sequences, Tab completions, and interactive text from `nano`/`vim`), command capture occurs at the **Bash readline execution boundary**:
 
-Every dynamically launched lab container is configured with the following restrictions:
+1. **Controlled Shell Initialization**:
+   When a terminal session connects, an initialization script creates `/tmp/.vl_bashrc` and `/tmp/.vl_history` in the container's tmpfs:
+   ```bash
+   if [ -f /home/student/.bashrc ]; then . /home/student/.bashrc; fi
+   export HISTFILE=/tmp/.vl_history
+   export HISTSIZE=10000
+   export HISTFILESIZE=10000
+   export HISTCONTROL=ignoredups
+   shopt -s histappend
+   export PROMPT_COMMAND="history -a"
+   ```
+2. **Immediate Append**:
+   Whenever a command finishes executing, `PROMPT_COMMAND` triggers `history -a`, immediately appending the completed command line to `/tmp/.vl_history`.
+3. **Structured Real-Time Streaming**:
+   The backend attaches a companion `tail -n 0 -F /tmp/.vl_history` exec stream to the container. As new lines are appended, they are streamed in real time to the Node.js backend.
+4. **Why No Docker Image Rebuild Was Needed**:
+   Standard core utilities (`bash`, `sh`, `tail`, `touch`, `cat`) are already present in Ubuntu 24.04 and `virtuallab-linux:1.0`. The integration runs entirely at runtime in the ephemeral `/tmp` tmpfs.
+5. **Container Security Maintained**:
+   - The student container's network remains **completely detached** (`network: none`).
+   - The student container has **zero access** to AWS credentials, instance metadata, or the Docker socket.
 
-| Parameter | Value | Purpose |
+### 3. DynamoDB Record Schema
+
+Table: `VirtualLabCommandLogs`
+- **Partition Key**: `sessionId` (String) — actual backend-generated session ID.
+- **Sort Key**: `eventId` (String) — `${isoTimestamp}_${seq}_${uuid}` (strictly monotonic, globally unique, chronologically sortable).
+
+| Field | Type | Description |
 |---|---|---|
-| **Base Image** | `virtuallab-linux:1.0` | Custom Ubuntu image with bash, nano, vim, python3 |
-| **User** | `student` (UID 1001) | Non-root principle of least privilege |
-| **Working Dir** | `/home/student` | Isolated home directory |
-| **Command** | `sleep infinity` | Keeps container running for interactive exec |
-| **Memory Limit** | `128 MB` | Prevents RAM exhaustion on host |
-| **CPU Limit** | `0.25 vCPU` (250,000,000 NanoCPUs) | Fair CPU scheduling |
-| **PID Limit** | `64` | Prevents fork-bombs (`:(){ :\|:& };:`) |
-| **Network Mode** | `none` | Blocks all ingress and egress network traffic |
-| **Capabilities** | `CapDrop: ['ALL']` | Drops all Linux kernel capabilities |
-| **Privileges** | `no-new-privileges: true` | Blocks setuid / setgid privilege escalation |
-| **Privileged Mode** | `false` | Explicitly non-privileged |
-| **Tmpfs Limits** | `/tmp` (32MB), `/run` (16MB) | Ephemeral in-memory writable storage with `nosuid` |
-| **Host Mounts** | `Binds: []` | Strictly no host directories or docker socket mounted |
-| **Labels** | `virtuallab.managed=true` | Identifies containers for automated cleanup |
+| `sessionId` | String | Unique server-side session identifier (e.g. `sess_student1_...`) |
+| `eventId` | String | Chronological sort key (e.g. `2026-11-24T08:35:12.345Z_000001_8f3de860...`) |
+| `studentId` | String | Authenticated student identity |
+| `studentName` | String | Student display name |
+| `labId` | String | Target lab identifier (e.g. `lab-linux-perm`) |
+| `containerId` | String | First 12 characters of associated Docker container ID |
+| `command` | String | Sanitized and redacted command string or lifecycle message |
+| `timestamp` | String | ISO 8601 UTC timestamp |
+| `eventType` | String | `COMMAND_HISTORY`, `LAB_STARTED`, or `LAB_STOPPED` |
+| `exitCode` | Number | Optional process exit code |
+
+### 4. Reliability & Sensitive Input Protection
+- **Non-blocking Execution**: Commands are pushed to an in-memory bounded queue (`maxQueueSize = 1000`). Terminal execution is never blocked by database latency.
+- **Retry Mechanism**: Transient DynamoDB errors trigger exponential backoff retries (up to 3 attempts). Permanent failures increment `totalEventsFailed` without crashing the process.
+- **Graceful Shutdown Flush**: When a session stops or server shuts down, `flushQueue()` waits for pending events to persist before container teardown.
+- **Persistence After Teardown**: Command logs exist in DynamoDB and remain fully queryable even after containers are stopped and deleted.
+- **Secret Redaction**: Commands are filtered before storage:
+  - AWS keys (`AKIA...`) -> `[REDACTED_AWS_KEY]`
+  - Passwords (`--password=...`, `-p secret`) -> `[REDACTED_PASS]`
+  - Tokens (`Bearer ...`, `token=...`) -> `[REDACTED_TOKEN]`
+  - Private key blocks -> `[REDACTED_PRIVATE_KEY]`
 
 ---
 
 ## Deployment Steps on AWS EC2
 
 ### Step 1: Connect to AWS EC2 Instance
-
-From your Windows workstation (PowerShell or Git Bash):
 ```bash
 ssh -i "path/to/your-key.pem" ubuntu@<EC2_PUBLIC_IP>
 ```
 
-### Step 2: Verify Docker & Pre-built Image
-
-Ensure Docker is running and the custom student image `virtuallab-linux:1.0` exists:
+### Step 2: Update Code on EC2
 ```bash
-docker --version
-docker images | grep virtuallab-linux
-```
-*(If image `virtuallab-linux:1.0` is missing, build it using `docker build -t virtuallab-linux:1.0 .` from your Dockerfile directory).*
-
-Ensure the `ubuntu` user can run Docker commands without `sudo`:
-```bash
-docker ps
-```
-*(If permission is denied: `sudo usermod -aG docker $USER && newgrp docker`).*
-
-### Step 3: Clone / Copy Backend Code to EC2
-
-Clone the repository or copy the `backend` folder to `/home/ubuntu/virtuallab-backend`:
-```bash
-mkdir -p /home/ubuntu/virtuallab-backend
 cd /home/ubuntu/virtuallab-backend
+git pull origin main
 ```
 
-### Step 4: Install Dependencies
-
+### Step 3: Install Required Dependencies
+Install the newly added AWS SDK v3 client and document libraries:
 ```bash
-# Verify Node.js version (must be >= 18.0.0)
-node -v
-
-# Install production dependencies
 npm install
 ```
 
-### Step 5: Configure Environment Variables
-
-Create your `.env` configuration:
-```bash
-cp .env.example .env
-```
-
-Ensure `.env` contains:
+### Step 4: Verify `.env` Configuration
+Ensure `.env` contains the DynamoDB configuration:
 ```ini
 PORT=5000
 HOST=127.0.0.1
 NODE_ENV=production
-DOCKER_SOCKET_PATH=/var/run/docker.sock
+DOCKER_SOCKET=/var/run/docker.sock
 LAB_DOCKER_IMAGE=virtuallab-linux:1.0
-SESSION_DURATION_MINUTES=30
-MAX_GLOBAL_CONCURRENT_LABS=2
-MAX_LABS_PER_STUDENT=1
 ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+MAX_GLOBAL_CONCURRENT_LABS=2
+MAX_STUDENT_CONCURRENT_LABS=1
+SESSION_DURATION_MINUTES=30
+TICKET_TTL_SECONDS=60
+CONTAINER_MEMORY_LIMIT_MB=128
+CONTAINER_CPU_LIMIT=0.25
+CONTAINER_PIDS_LIMIT=64
+WS_RATE_LIMIT_MESSAGES_PER_SEC=100
+
+# AWS DynamoDB Configuration (Phase 2)
+AWS_REGION=ap-south-1
+DYNAMODB_TABLE_NAME=VirtualLabCommandLogs
+COMMAND_LOGGING_ENABLED=true
 ```
 
-### Step 6: Start Backend Service
-
-To start in foreground for immediate testing:
+### Step 5: Run Automated Verification Suite
+Run the test suite on EC2 to verify all 19 tests pass:
 ```bash
-npm start
+npm test
 ```
 
-Or run persistently using **PM2** (recommended for production/presentation):
+### Step 6: Start / Restart the Backend Service
 ```bash
-sudo npm install -g pm2
-pm2 start src/server.js --name virtuallab-backend
-pm2 status
+# If using PM2:
+pm2 restart virtuallab-backend || pm2 start src/server.js --name virtuallab-backend
+pm2 logs virtuallab-backend --lines 25
 ```
 
 ---
 
-## Connecting from Workstation (SSH Port Forwarding)
+## Verifying in AWS DynamoDB Console
 
-Because the backend is bound strictly to `127.0.0.1:5000` for security, **do not open port 5000 in your AWS EC2 Security Group**. Instead, forward local port 5000 over an encrypted SSH tunnel.
-
-Run this command on your Windows workstation in a separate terminal:
-
-```bash
-ssh -i "path/to/your-key.pem" -N -L 5000:127.0.0.1:5000 ubuntu@<EC2_PUBLIC_IP>
-```
-
-*Flags explained:*
-- `-i "path/to/key.pem"`: Path to your AWS EC2 private key file.
-- `-N`: Do not execute remote commands (tunnels traffic only).
-- `-L 5000:127.0.0.1:5000`: Forwards workstation port `5000` to EC2 port `5000`.
+1. Log in to the [AWS Management Console](https://console.aws.amazon.com/).
+2. Select Region: **ap-south-1 (Asia Pacific - Mumbai)**.
+3. Navigate to **DynamoDB** -> **Tables** -> **VirtualLabCommandLogs**.
+4. Click **Explore table items**.
+5. You will see:
+   - Partition Key (`sessionId`): The exact session identifier (e.g. `sess_student1_...`).
+   - Sort Key (`eventId`): Chronologically ordered event timestamps.
+   - Initial lifecycle event: `eventType = 'LAB_STARTED'`.
+   - Each executed command: `eventType = 'COMMAND_HISTORY'`, with the clean command string.
+   - Final lifecycle event: `eventType = 'LAB_STOPPED'`.
 
 ---
 
-## Testing & Verifying the API
+## API Testing Instructions (via SSH Port Forwarding)
 
-While the SSH tunnel is active, test the backend from your local workstation:
+With SSH tunnel active (`ssh -L 5000:127.0.0.1:5000 ubuntu@<EC2_PUBLIC_IP>`):
 
-### 1. Health Check & Docker Connectivity
+### 1. Health Check (Includes DynamoDB & Docker Status)
 ```bash
 curl http://localhost:5000/api/health
 ```
-**Expected Response:**
+**Sample Output:**
 ```json
 {
   "status": "ok",
-  "docker": {
+  "docker": { "connected": true, "socket": "/var/run/docker.sock" },
+  "sessions": { "activeCount": 0, "maxGlobalConcurrent": 2, "maxPerStudent": 1 },
+  "dynamoDB": {
+    "enabled": true,
     "connected": true,
-    "socket": "/var/run/docker.sock"
-  },
-  "sessions": {
-    "activeCount": 0,
-    "maxGlobalConcurrent": 2,
-    "maxPerStudent": 1,
-    "durationMinutes": 30
-  },
-  "image": "virtuallab-linux:1.0"
+    "tableName": "VirtualLabCommandLogs",
+    "region": "ap-south-1",
+    "queue": { "pendingEvents": 0, "totalLogged": 0, "totalFailed": 0 },
+    "error": null
+  }
 }
 ```
 
-### 2. Launch Lab Container
+### 2. Launch Lab
 ```bash
 curl -X POST http://localhost:5000/api/labs/launch \
   -H "Content-Type: application/json" \
   -H "x-user-id: usr-student-divyansh" \
   -H "x-user-name: Divyansh Sharma" \
-  -H "x-user-role: student" \
   -d '{"labId": "lab-linux-perm"}'
 ```
-**Expected Response:**
-```json
-{
-  "success": true,
-  "message": "Container provisioned successfully on AWS EC2.",
-  "session": {
-    "id": "sess_usrstudentdi_1711234567890_a1b2c3d4",
-    "studentId": "usr-student-divyansh",
-    "containerName": "vl-lab-usrstudentdi-a1b2c3d4",
-    "durationMinutes": 30,
-    "timeRemainingSeconds": 1800,
-    "ticket": "9f8e7d...",
-    "wsEndpoint": "/ws/terminal/sess_usrstudentdi_1711234567890_a1b2c3d4"
-  }
-}
-```
 
-### 3. Check Lab Status
+### 3. Query Session History from Backend API
 ```bash
-curl http://localhost:5000/api/labs/<SESSION_ID>/status \
-  -H "x-user-id: usr-student-divyansh"
-```
-
-### 4. Stop and Clean Up Container
-```bash
-curl -X DELETE http://localhost:5000/api/labs/<SESSION_ID> \
+curl http://localhost:5000/api/labs/<SESSION_ID>/history \
   -H "x-user-id: usr-student-divyansh"
 ```
 
 ---
 
-## Frontend Integration
+## Limitations of Bash Command Capture
 
-1. On your Windows laptop, start the frontend:
-   ```bash
-   npm run dev
-   ```
-2. Open `http://localhost:5173`.
-3. Sign in or switch to any Student account (e.g. Divyansh Sharma).
-4. Click **Launch Lab** on any lab card or in the navigation bar.
-5. The workspace opens, calls `/api/labs/launch`, receives the one-time authentication ticket, connects `@xterm/xterm` over `ws://localhost:5000/ws/terminal/:id?ticket=...`, and attaches directly to an interactive `bash` shell inside the AWS container!
+1. **Not a Cryptographic Kernel Audit**:
+   Commands are captured at the shell readline/history layer via `PROMPT_COMMAND="history -a"`. If a student invokes a subshell that disables history (`set +o history` or unsets `PROMPT_COMMAND`), commands within that specific subshell will not append to history. (For kernel-level non-bypassable auditing in enterprise environments, Linux `auditd` / eBPF probes would be required).
+2. **Piped Background Subshells**:
+   Commands executed non-interactively via scripts (e.g. `bash script.sh`) run as child processes and do not trigger interactive readline history for their internal script lines; only the parent invocation (`bash script.sh`) is recorded.
+3. **Sensitive Data in Arguments**:
+   While regex redactions mask common flags (`--password`, `-p`, `Bearer`, `AKIA`), custom non-standard argument names might not match redaction heuristics. Students should follow academic lab best practices and avoid putting secrets on command line arguments.

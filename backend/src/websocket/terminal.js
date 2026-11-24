@@ -1,7 +1,97 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { docker } from '../docker.js';
 import { sessionManager } from '../sessionManager.js';
+import { dynamoDBService } from '../services/dynamoDBService.js';
 import { config } from '../config.js';
+
+const HISTORY_FILE = '/tmp/.vl_history';
+const RC_FILE = '/tmp/.vl_bashrc';
+
+/**
+ * Decoupled helper to initialize shell history capture hook and companion tail watcher once per container session.
+ * Operates independently of individual WebSocket client connections and never terminates interactive bash.
+ */
+async function ensureSessionHistoryCollector(session, container) {
+  if (session.historyCollectorStarted) return;
+  session.historyCollectorStarted = true;
+
+  const initScript = `touch ${HISTORY_FILE} && cat << 'EOF' > ${RC_FILE}
+if [ -f /home/student/.bashrc ]; then
+  . /home/student/.bashrc
+fi
+export HISTFILE=${HISTORY_FILE}
+export HISTSIZE=10000
+export HISTFILESIZE=10000
+export HISTCONTROL=ignoredups
+shopt -s histappend
+export PROMPT_COMMAND="history -a"
+EOF
+chmod 600 ${HISTORY_FILE} ${RC_FILE}
+`;
+
+  try {
+    const initExec = await container.exec({
+      Cmd: ['sh', '-c', initScript],
+      AttachStdout: true,
+      AttachStderr: true,
+      User: 'student'
+    });
+    const initStream = await initExec.start({ hijack: true });
+    initStream.resume(); // Drain and complete
+  } catch (initErr) {
+    console.warn(`[CommandHistory] Notice initializing shell history hook for '${session.id}': ${initErr.message}`);
+  }
+
+  try {
+    const tailExec = await container.exec({
+      Cmd: ['tail', '-n', '0', '-F', HISTORY_FILE],
+      AttachStdout: true,
+      AttachStderr: false,
+      Tty: false,
+      User: 'student'
+    });
+    const tailStream = await tailExec.start({ hijack: true, stdin: false });
+    session.tailStream = tailStream;
+
+    let historyBuffer = '';
+    tailStream.on('data', (chunk) => {
+      try {
+        historyBuffer += chunk.toString('utf8');
+        const lines = historyBuffer.split('\n');
+        historyBuffer = lines.pop(); // Retain incomplete line
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed) {
+            console.log(`[CommandHistory] Session '${session.id}' (${session.studentName}): ${trimmed}`);
+            dynamoDBService.logEvent({
+              sessionId: session.id,
+              studentId: session.studentId,
+              studentName: session.studentName,
+              labId: session.labId,
+              containerId: session.containerId,
+              command: trimmed,
+              eventType: 'COMMAND_HISTORY'
+            });
+          }
+        }
+      } catch (err) {
+        console.warn(`[CommandHistory] Notice processing history buffer for '${session.id}': ${err.message}`);
+      }
+    });
+
+    tailStream.on('error', (err) => {
+      console.warn(`[CommandHistory] Tail stream notice for '${session.id}': ${err.message}`);
+    });
+
+    tailStream.on('end', () => {
+      console.log(`[CommandHistory] Tail stream ended for session '${session.id}'`);
+      session.tailStream = null;
+    });
+  } catch (tailErr) {
+    console.warn(`[CommandHistory] Notice starting history watcher for '${session.id}': ${tailErr.message}`);
+  }
+}
 
 export function setupTerminalWebSocket(server) {
   const wss = new WebSocketServer({ noServer: true });
@@ -93,9 +183,14 @@ export function setupTerminalWebSocket(server) {
     try {
       const container = docker.getContainer(session.containerId);
 
-      // Create interactive Bash exec in student container
+      // 1. Ensure history hook and companion tail watcher are running (independent of interactive bash)
+      ensureSessionHistoryCollector(session, container).catch((e) => {
+        console.warn(`[CommandHistory] Collector initialization notice: ${e.message}`);
+      });
+
+      // 2. Create interactive Bash exec using the logging rcfile
       execInstance = await container.exec({
-        Cmd: ['/bin/bash'],
+        Cmd: ['/bin/bash', '--rcfile', RC_FILE],
         AttachStdin: true,
         AttachStdout: true,
         AttachStderr: true,
@@ -107,7 +202,9 @@ export function setupTerminalWebSocket(server) {
           'LC_ALL=C.UTF-8',
           'HOME=/home/student',
           'USER=student',
-          'SHELL=/bin/bash'
+          'SHELL=/bin/bash',
+          `HISTFILE=${HISTORY_FILE}`,
+          'PROMPT_COMMAND=history -a'
         ],
         WorkingDir: '/home/student',
         User: 'student'

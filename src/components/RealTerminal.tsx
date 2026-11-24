@@ -12,6 +12,7 @@ interface RealTerminalProps {
   onSessionError?: (error: string) => void;
   onTerminalSnapshot?: (snapshot: string) => void;
   quickCommandRef?: React.MutableRefObject<((cmd: string) => void) | null>;
+  onReconnect?: () => Promise<void> | void;
 }
 
 export const RealTerminal: React.FC<RealTerminalProps> = ({
@@ -20,7 +21,8 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
   containerRef,
   onSessionError,
   onTerminalSnapshot,
-  quickCommandRef
+  quickCommandRef,
+  onReconnect
 }) => {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
@@ -31,9 +33,20 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
     'connecting' | 'connected' | 'disconnected' | 'error'
   >('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState<number>(0);
 
   useEffect(() => {
     if (!terminalContainerRef.current) return;
+
+    let isCancelled = false;
+    let ws: WebSocket | null = null;
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let snapInterval: ReturnType<typeof setInterval> | null = null;
+
+    // Reset container DOM to prevent duplicate canvas elements during remount
+    if (terminalContainerRef.current) {
+      terminalContainerRef.current.innerHTML = '';
+    }
 
     // 1. Initialize xterm instance with dark VSCode/GitHub theme matching VirtualLab
     const term = new Terminal({
@@ -84,7 +97,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
       // Container might not be visible immediately
     }
 
-    // Inform parent of terminal buffer snapshot mechanism
+    // Periodic terminal buffer snapshot mechanism
     if (onTerminalSnapshot) {
       const getBufferText = () => {
         let text = '';
@@ -95,11 +108,11 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
         }
         return text.trim();
       };
-      // Save periodically or accessible via hook
-      const snapInterval = setInterval(() => {
-        onTerminalSnapshot(getBufferText());
+      snapInterval = setInterval(() => {
+        if (!isCancelled) {
+          onTerminalSnapshot(getBufferText());
+        }
       }, 5000);
-      return () => clearInterval(snapInterval);
     }
 
     // 2. Open WebSocket connection to AWS EC2 backend gateway
@@ -107,86 +120,105 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
       console.warn('[RealTerminal] Awaiting valid backend sessionId and ticket before connecting.');
       setConnectionStatus('connecting');
       return () => {
+        isCancelled = true;
+        if (snapInterval) clearInterval(snapInterval);
         term.dispose();
         terminalInstanceRef.current = null;
         fitAddonRef.current = null;
       };
     }
 
-    const wsUrl = labApi.getTerminalWsUrl(sessionId, ticket);
     setConnectionStatus('connecting');
     setErrorMessage(null);
 
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-    socketRef.current = ws;
+    // Schedule socket connection with 50ms debounce
+    // This allows React 18 Strict Mode immediate unmount to cancel without creating duplicate sockets
+    connectTimeout = setTimeout(() => {
+      if (isCancelled) return;
 
-    // Attach quick command executor function
-    if (quickCommandRef) {
-      quickCommandRef.current = (cmd: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(cmd + '\n');
-          term.focus();
+      const wsUrl = labApi.getTerminalWsUrl(sessionId, ticket);
+      const activeWs = new WebSocket(wsUrl);
+      activeWs.binaryType = 'arraybuffer';
+      ws = activeWs;
+      socketRef.current = activeWs;
+
+      // Attach quick command executor function
+      if (quickCommandRef) {
+        quickCommandRef.current = (cmd: string) => {
+          if (activeWs.readyState === WebSocket.OPEN) {
+            activeWs.send(cmd + '\n');
+            term.focus();
+          }
+        };
+      }
+
+      activeWs.onopen = () => {
+        if (isCancelled) {
+          try { activeWs.close(1000, 'Unmounted'); } catch (e) {}
+          return;
+        }
+        setConnectionStatus('connected');
+        setErrorMessage(null);
+        term.focus();
+
+        // Send initial dimensions to Dockerode exec
+        try {
+          fitAddon.fit();
+          activeWs.send(JSON.stringify({
+            type: 'resize',
+            cols: term.cols,
+            rows: term.rows
+          }));
+        } catch (e) {}
+      };
+
+      activeWs.onmessage = (event) => {
+        if (isCancelled) return;
+        if (typeof event.data === 'string') {
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.type === 'session_closed') {
+              term.write(`\r\n\x1b[33m[Session Closed: ${parsed.reason}]\x1b[0m\r\n`);
+              return;
+            }
+          } catch {
+            // Normal terminal string
+          }
+          term.write(event.data);
+        } else if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
         }
       };
-    }
 
-    ws.onopen = () => {
-      setConnectionStatus('connected');
-      term.focus();
+      activeWs.onerror = () => {
+        if (isCancelled) return;
+        setConnectionStatus('error');
+        const err = 'WebSocket connection failed. Verify EC2 backend port forward (localhost:5000).';
+        setErrorMessage(err);
+        if (onSessionError) onSessionError(err);
+        term.write(`\r\n\x1b[31m[VirtualLab: Connection error. Is backend tunnel active on port 5000?]\x1b[0m\r\n`);
+      };
 
-      // Send initial dimensions to Dockerode exec
-      fitAddon.fit();
-      ws.send(JSON.stringify({
-        type: 'resize',
-        cols: term.cols,
-        rows: term.rows
-      }));
-    };
-
-    ws.onmessage = (event) => {
-      if (typeof event.data === 'string') {
-        try {
-          const parsed = JSON.parse(event.data);
-          if (parsed.type === 'session_closed') {
-            term.write(`\r\n\x1b[33m[Session Closed: ${parsed.reason}]\x1b[0m\r\n`);
-            return;
-          }
-        } catch {
-          // Normal terminal string
+      activeWs.onclose = (event) => {
+        if (isCancelled) return;
+        setConnectionStatus('disconnected');
+        if (event.code !== 1000) {
+          term.write(`\r\n\x1b[33m[VirtualLab: Shell disconnected (Code ${event.code})]\x1b[0m\r\n`);
         }
-        term.write(event.data);
-      } else if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data));
-      }
-    };
-
-    ws.onerror = () => {
-      setConnectionStatus('error');
-      const err = 'WebSocket connection failed. Verify EC2 backend port forward (localhost:5000).';
-      setErrorMessage(err);
-      if (onSessionError) onSessionError(err);
-      term.write(`\r\n\x1b[31m[VirtualLab: Connection error. Is backend tunnel active on port 5000?]\x1b[0m\r\n`);
-    };
-
-    ws.onclose = (event) => {
-      setConnectionStatus('disconnected');
-      if (event.code !== 1000) {
-        term.write(`\r\n\x1b[33m[VirtualLab: Shell disconnected (Code ${event.code})]\x1b[0m\r\n`);
-      }
-    };
+      };
+    }, 50);
 
     // 3. User Keystrokes -> WebSocket
     const dataListener = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(data);
       }
     });
 
     // 4. Terminal Resize -> Dockerode resize
     const resizeListener = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
     });
 
@@ -201,27 +233,54 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({
     resizeObserver.observe(terminalContainerRef.current);
 
     return () => {
+      isCancelled = true;
+      if (connectTimeout) clearTimeout(connectTimeout);
+      if (snapInterval) clearInterval(snapInterval);
       if (quickCommandRef) {
         quickCommandRef.current = null;
       }
       resizeObserver.disconnect();
       dataListener.dispose();
       resizeListener.dispose();
-      ws.close();
+
+      const closingWs = ws;
+      if (closingWs) {
+        closingWs.onopen = null;
+        closingWs.onmessage = null;
+        closingWs.onerror = null;
+        closingWs.onclose = null;
+
+        if (closingWs.readyState === WebSocket.CONNECTING) {
+          closingWs.onopen = () => {
+            try { closingWs.close(1000, 'Unmounted'); } catch (e) {}
+          };
+        } else if (closingWs.readyState === WebSocket.OPEN) {
+          try { closingWs.close(1000, 'Unmounted'); } catch (e) {}
+        }
+      }
+
       term.dispose();
       socketRef.current = null;
       terminalInstanceRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sessionId, ticket]);
+  }, [sessionId, ticket, reconnectAttempt]);
 
-  const handleManualReconnect = () => {
+  const handleManualReconnect = async () => {
     if (socketRef.current) {
-      socketRef.current.close();
+      try { socketRef.current.close(1000, 'Manual reconnect'); } catch (e) {}
     }
-    // Re-trigger effect by clearing error
     setErrorMessage(null);
     setConnectionStatus('connecting');
+
+    if (onReconnect) {
+      try {
+        await onReconnect();
+      } catch (e) {
+        console.warn('Manual reconnect request notice:', e);
+      }
+    }
+    setReconnectAttempt(n => n + 1);
   };
 
   const handleFit = () => {

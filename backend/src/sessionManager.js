@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { docker } from './docker.js';
+import { dynamoDBService } from './services/dynamoDBService.js';
 import { config } from './config.js';
 
 class SessionManager {
@@ -257,6 +258,17 @@ class SessionManager {
       this.sessions.set(sessionId, session);
       console.log(`[SessionManager] Registered session '${sessionId}'. Active sessions: ${this.getActiveCount()}/${config.maxGlobalConcurrentLabs}`);
 
+      // 8. Log session lifecycle event to DynamoDB
+      dynamoDBService.logEvent({
+        sessionId: session.id,
+        studentId: session.studentId,
+        studentName: session.studentName,
+        labId: session.labId,
+        containerId: session.containerId,
+        command: `Lab session started: container ${containerName} provisioned on EC2`,
+        eventType: 'LAB_STARTED'
+      });
+
       return session;
 
     } finally {
@@ -284,6 +296,17 @@ class SessionManager {
     console.log(`[SessionManager] Stopping session ${sessionId} (${reason})...`);
     session.state = 'stopping';
 
+    // Log session stop lifecycle event before tearing down resources
+    dynamoDBService.logEvent({
+      sessionId: session.id,
+      studentId: session.studentId,
+      studentName: session.studentName,
+      labId: session.labId,
+      containerId: session.containerId,
+      command: `Lab session stopped: ${reason}`,
+      eventType: 'LAB_STOPPED'
+    });
+
     // 1. Close attached WebSockets
     for (const ws of session.wsClients) {
       try {
@@ -295,7 +318,68 @@ class SessionManager {
     }
     session.wsClients.clear();
 
-    // 2. Stop and remove Docker container
+    // 2. Stop decoupled history tail stream if active
+    if (session.tailStream) {
+      try {
+        session.tailStream.removeAllListeners();
+        session.tailStream.destroy();
+      } catch (e) {
+        // Ignore stream teardown errors
+      }
+      session.tailStream = null;
+    }
+
+    // 3. Collect final residual command history directly from container before deletion
+    try {
+      const container = docker.getContainer(session.containerId);
+      if (container && typeof container.exec === 'function') {
+        const catExec = await container.exec({
+          Cmd: ['cat', '/tmp/.vl_history'],
+          AttachStdout: true,
+          AttachStderr: false,
+          User: 'student'
+        });
+        const catStream = await catExec.start({ hijack: true, stdin: false });
+        let rawHistory = '';
+        await new Promise((resolve) => {
+          catStream.on('data', (chunk) => {
+            rawHistory += chunk.toString('utf8');
+          });
+          catStream.on('end', resolve);
+          catStream.on('error', resolve);
+          setTimeout(resolve, 500); // Guard safety timeout
+        });
+
+        if (rawHistory) {
+          const lines = rawHistory.split('\n');
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              dynamoDBService.logEvent({
+                sessionId: session.id,
+                studentId: session.studentId,
+                studentName: session.studentName,
+                labId: session.labId,
+                containerId: session.containerId,
+                command: trimmed,
+                eventType: 'COMMAND_HISTORY'
+              });
+            }
+          }
+        }
+      }
+    } catch (collectErr) {
+      // Non-fatal if container was already killed or inaccessible
+    }
+
+    // 4. Flush any pending DynamoDB log records before container deletion
+    try {
+      await dynamoDBService.flushQueue(2000);
+    } catch (e) {
+      console.warn(`[SessionManager] DynamoDB queue flush warning: ${e.message}`);
+    }
+
+    // 5. Stop and remove Docker container
     try {
       const container = docker.getContainer(session.containerId);
       await container.remove({ force: true });

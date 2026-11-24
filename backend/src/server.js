@@ -7,6 +7,7 @@ import { labsRouter } from './routes/labs.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupTerminalWebSocket } from './websocket/terminal.js';
 import { sessionManager } from './sessionManager.js';
+import { dynamoDBService } from './services/dynamoDBService.js';
 import { checkDockerConnectivity } from './docker.js';
 
 const app = express();
@@ -65,19 +66,31 @@ async function startServer() {
     console.warn('[Docker Warning] Endpoints requiring Docker will return 503 until Docker socket is accessible.');
   }
 
-  // 2. Reconcile live managed Docker containers & clean up stale/duplicate ones
+  // 2. Check DynamoDB connectivity (IAM Role: VirtualLabEC2Role)
+  if (config.commandLoggingEnabled) {
+    const dynamoCheck = await dynamoDBService.checkConnectivity();
+    if (dynamoCheck.connected) {
+      console.log(`[DynamoDB] Connected to table '${config.dynamoDbTableName}' in region '${config.awsRegion}' (Status: ${dynamoCheck.status})`);
+    } else {
+      console.warn(`[DynamoDB Notice] Table check: ${dynamoCheck.error || dynamoCheck.status}`);
+      console.warn('[DynamoDB Notice] Commands will be queued asynchronously and retried.');
+    }
+  }
+
+  // 3. Reconcile live managed Docker containers & clean up stale/duplicate ones
   if (dockerCheck.ok) {
     await sessionManager.reconcileWithDocker();
   }
 
-  // 3. Start automated container expiration reaper
+  // 4. Start automated container expiration reaper
   sessionManager.startReaper();
 
-  // 4. Bind server to host and port (defaults to 127.0.0.1:5000 for SSH tunneling)
+  // 5. Bind server to host and port (defaults to 127.0.0.1:5000 for SSH tunneling)
   server.listen(config.port, config.host, () => {
     console.log(`[Server] VirtualLab backend running at http://${config.host}:${config.port}`);
     console.log(`[Server] Environment: ${config.nodeEnv}`);
     console.log(`[Server] Lab Image: ${config.labDockerImage}`);
+    console.log(`[Server] DynamoDB Logging: ${config.commandLoggingEnabled ? 'Enabled (' + config.dynamoDbTableName + ')' : 'Disabled'}`);
     console.log(`[Server] Max Global Labs: ${config.maxGlobalConcurrentLabs} | Max Per Student: ${config.maxStudentConcurrentLabs}`);
     console.log(`[Server] Session Duration: ${config.sessionDurationMinutes} minutes`);
     console.log(`[Server] Allowed Origins: ${config.allowedOrigins.join(', ')}`);
@@ -97,6 +110,13 @@ const shutdown = async (signal) => {
     } catch (e) {
       console.warn(`[Shutdown] Error stopping session ${sessionId}: ${e.message}`);
     }
+  }
+
+  // Flush any pending DynamoDB log records
+  try {
+    await dynamoDBService.flushQueue(2000);
+  } catch (e) {
+    console.warn(`[Shutdown] DynamoDB flush notice: ${e.message}`);
   }
 
   server.close(() => {

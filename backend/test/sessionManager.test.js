@@ -43,20 +43,39 @@ const mockDocker = {
     return container;
   },
   getContainer: (id) => ({
+    id,
     remove: async () => {
       mockDockerContainers.delete(id);
-    }
+    },
+    exec: async (opts) => ({
+      start: async () => {
+        const { Readable } = await import('stream');
+        return Readable.from([Buffer.from('echo "final test command before teardown"\n')]);
+      }
+    })
   }),
   listContainers: async () => {
     return Array.from(mockDockerContainers.values());
   }
 };
 
-// 3. Import and test SessionManager with Mock Docker
+// 3. Import and test SessionManager with Mock Docker & Isolated DynamoDB
 import { sessionManager } from '../src/sessionManager.js';
-// Replace docker reference for test
 import { docker } from '../src/docker.js';
+import { dynamoDBService } from '../src/services/dynamoDBService.js';
 Object.assign(docker, mockDocker);
+
+// Isolate DynamoDB: Guarantee that automated tests never touch real AWS DynamoDB table
+const capturedDynamoEvents = [];
+dynamoDBService.docClient = {
+  send: async (cmd) => {
+    if (cmd && cmd.input && cmd.input.Item) {
+      capturedDynamoEvents.push(cmd.input.Item);
+    }
+    return {};
+  }
+};
+dynamoDBService.connected = true;
 
 async function runTests() {
   console.log('Test 2: Initial activeCount must be 0');
@@ -219,6 +238,25 @@ async function runTests() {
   await sessionManager.stopSession(completedSession.id);
   assert.strictEqual(sessionManager.getActiveCount(), 0);
   console.log('  ✓ In-flight concurrency lock verified\n');
+
+  console.log('Test 12: Final command collection before container deletion & DynamoDB test isolation');
+  const sessPreTeardown = await sessionManager.launchLabSession({
+    studentId: 'student-teardown',
+    studentName: 'Eve',
+    labId: 'lab-linux-perm'
+  });
+  const eventCountBefore = capturedDynamoEvents.length;
+  await sessionManager.stopSession(sessPreTeardown.id, 'Teardown test verification');
+  const eventsAfter = capturedDynamoEvents.slice(eventCountBefore);
+
+  const finalCmdEvent = eventsAfter.find(e => e.command === 'echo "final test command before teardown"');
+  const stoppedEvent = eventsAfter.find(e => e.eventType === 'LAB_STOPPED');
+
+  assert.ok(finalCmdEvent, 'Final command from /tmp/.vl_history must be collected before container removal');
+  assert.ok(stoppedEvent, 'LAB_STOPPED event must be logged');
+  assert.strictEqual(finalCmdEvent.sessionId, sessPreTeardown.id);
+  console.log('  ✓ Final commands successfully extracted from container prior to deletion');
+  console.log('  ✓ Mock test events strictly captured in-memory and isolated from real DynamoDB table\n');
 
   console.log('========================================================');
   console.log('  ALL ACCEPTANCE CRITERIA TESTS PASSED SUCCESSFULLY!    ');

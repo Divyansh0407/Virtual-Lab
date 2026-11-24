@@ -42,5 +42,12 @@ export const config = {
   pidsLimit: parseInt(process.env.CONTAINER_PIDS_LIMIT || '64', 10),
 
   // Rate Limiting
-  wsRateLimitMessagesPerSec: parseInt(process.env.WS_RATE_LIMIT_MESSAGES_PER_SEC || '100', 10)
+  wsRateLimitMessagesPerSec: parseInt(process.env.WS_RATE_LIMIT_MESSAGES_PER_SEC || '100', 10),
+
+  // AWS DynamoDB Command Logging
+  awsRegion: process.env.AWS_REGION || 'ap-south-1',
+  dynamoDbTableName: process.env.DYNAMODB_TABLE_NAME || 'VirtualLabCommandLogs',
+  commandLoggingEnabled: process.env.COMMAND_LOGGING_ENABLED !== 'false',
+  maxLogQueueSize: parseInt(process.env.MAX_LOG_QUEUE_SIZE || '1000', 10),
+  logMaxRetries: parseInt(process.env.LOG_MAX_RETRIES || '3', 10)
 };

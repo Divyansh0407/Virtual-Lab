@@ -51,7 +51,7 @@ interface AppContextType {
   startLabSession: (labId: string) => void;
   stopLabSession: () => void;
   resetLabSession: () => void;
-  reconnectLabSession: () => void;
+  reconnectLabSession: () => Promise<void>;
   executeTerminalCommand: (cmd: string) => void;
   updateSessionFile: (fileName: string, content: string) => void;
   createSessionFile: (fileName: string) => void;
@@ -468,9 +468,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await startLabSession(labId);
   };
 
-  const reconnectLabSession = () => {
-    if (!activeSession) return;
-    setActiveSession(prev => prev ? { ...prev, state: 'running' } : null);
+  const reconnectLabSession = async () => {
+    if (!activeSession || !activeSession.id || !activeSession.id.startsWith('sess_')) return;
+    try {
+      const statusRes = await labApi.getLabStatus(activeSession.id, currentUser.id, currentUser.role);
+      if (statusRes.session?.ticket) {
+        setActiveSession(prev => prev ? {
+          ...prev,
+          state: 'running',
+          ticket: statusRes.session.ticket,
+          errorMessage: undefined
+        } : null);
+      }
+    } catch (err: any) {
+      console.warn('Failed to refresh ticket for reconnection:', err);
+    }
   };
 
   // Real interactive terminal parser!

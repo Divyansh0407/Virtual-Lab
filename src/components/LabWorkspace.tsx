@@ -37,6 +37,7 @@ export const LabWorkspace: React.FC = () => {
     startLabSession,
     stopLabSession,
     resetLabSession,
+    reconnectLabSession,
     executeTerminalCommand,
     updateSessionFile,
     createSessionFile,
@@ -430,6 +431,7 @@ export const LabWorkspace: React.FC = () => {
                 ticket={activeSession.ticket}
                 containerRef={activeSession.containerRef}
                 quickCommandRef={quickCommandRef}
+                onReconnect={reconnectLabSession}
                 onSessionError={(err) => {
                   console.warn('RealTerminal connection alert:', err);
                 }}
