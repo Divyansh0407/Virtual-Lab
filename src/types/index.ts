@@ -95,6 +95,9 @@ export interface LabSession {
   terminalLogs: string[];
   files: LabFile[];
   studentAnswers: Record<string, string>;
+  ticket?: string;
+  wsEndpoint?: string;
+  errorMessage?: string;
 }
 
 export interface TestCaseResult {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { RealTerminal } from './RealTerminal';
 import {
   Terminal,
   Play,
@@ -53,6 +54,15 @@ export const LabWorkspace: React.FC = () => {
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const quickCommandRef = useRef<((cmd: string) => void) | null>(null);
+
+  const handleQuickRun = (cmd: string) => {
+    if (quickCommandRef.current) {
+      quickCommandRef.current(cmd + '\n');
+    } else {
+      executeTerminalCommand(cmd);
+    }
+  };
 
   // Editor state
   const [selectedFileName, setSelectedFileName] = useState<string>('report.txt');
@@ -204,6 +214,13 @@ export const LabWorkspace: React.FC = () => {
                     Queued
                   </span>
                 </>
+              ) : activeSession?.state === 'failed' ? (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                  <span className="font-bold text-red-600 uppercase tracking-wide">
+                    Failed
+                  </span>
+                </>
               ) : (
                 <>
                   <span className="w-2.5 h-2.5 rounded-full bg-gray-400"></span>
@@ -221,13 +238,13 @@ export const LabWorkspace: React.FC = () => {
               </div>
             )}
 
-            {!activeSession || activeSession.state === 'stopped' ? (
+            {!activeSession || activeSession.state === 'stopped' || activeSession.state === 'failed' ? (
               <button
                 onClick={() => startLabSession(currentLab.id)}
                 className="px-4 py-1.5 rounded-xl bg-[#15171c] hover:bg-[#252830] text-white font-semibold text-xs flex items-center space-x-1.5 shadow-sm transition-all btn-tactile hover-lift"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Start Lab Environment</span>
+                <span>{activeSession?.state === 'failed' ? 'Retry Launch' : 'Launch Lab'}</span>
               </button>
             ) : (
               <>
@@ -276,6 +293,25 @@ export const LabWorkspace: React.FC = () => {
             <div className="text-[11px]">
               Container Ref: <span className="text-[#15171c] font-bold">{activeSession.containerRef}</span>
             </div>
+          </div>
+        )}
+
+        {/* Provisioning / Connection Error Notice */}
+        {activeSession?.errorMessage && (
+          <div className="mt-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 flex items-start justify-between gap-3 animate-fade-in">
+            <div className="flex items-start space-x-2.5">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-red-900">Backend Provisioning Notice</p>
+                <p className="text-red-700 mt-0.5">{activeSession.errorMessage}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => startLabSession(currentLab.id)}
+              className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold flex-shrink-0 text-xs transition-all shadow-sm"
+            >
+              Retry
+            </button>
           </div>
         )}
       </div>
@@ -344,123 +380,94 @@ export const LabWorkspace: React.FC = () => {
 
       {/* TAB 1: BASH TERMINAL */}
       {activeTab === 'terminal' && (
-        <div className="rounded-2xl border border-[#e3e6eb] bg-[#0d1117] text-white shadow-xl overflow-hidden flex flex-col h-[520px]">
-          <div className="bg-[#161b22] px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <span className="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
-              <span className="w-3 h-3 rounded-full bg-amber-500 inline-block"></span>
-              <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
-              <span className="text-xs font-mono text-gray-400 ml-2">
-                student@{activeSession?.containerRef || 'virtuallab-sandbox'}:/home/student/workspace (bash 80x24)
-              </span>
-            </div>
-            <button
-              onClick={() => executeTerminalCommand('clear')}
-              className="text-xs text-gray-400 hover:text-white px-2 py-0.5 rounded bg-gray-800"
-            >
-              Clear
-            </button>
-          </div>
-
-          <div className="bg-[#161b22]/70 px-3 py-2 border-b border-gray-800 flex items-center space-x-2 overflow-x-auto text-[11px] font-mono">
-            <span className="text-gray-500 flex-shrink-0">Quick Run:</span>
-            <button
-              onClick={() => executeTerminalCommand('touch report.txt')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-blue-300 flex-shrink-0"
-            >
-              touch report.txt
-            </button>
-            <button
-              onClick={() => executeTerminalCommand('chmod 640 report.txt')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-emerald-300 flex-shrink-0 font-bold"
-            >
-              chmod 640 report.txt
-            </button>
-            <button
-              onClick={() => executeTerminalCommand('stat -c "%a %n" report.txt')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-amber-300 flex-shrink-0"
-            >
-              stat -c "%a %n" report.txt
-            </button>
-            <button
-              onClick={() => executeTerminalCommand('ls -la')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-purple-300 flex-shrink-0"
-            >
-              ls -la
-            </button>
-            <button
-              onClick={() => executeTerminalCommand('ps aux')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex-shrink-0"
-            >
-              ps aux
-            </button>
-            <button
-              onClick={() => executeTerminalCommand('cat instructions.txt')}
-              className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex-shrink-0"
-            >
-              cat instructions.txt
-            </button>
-          </div>
-
-          <div className="flex-1 p-4 overflow-y-auto font-mono text-xs sm:text-sm space-y-1 bg-[#0d1117] text-gray-200">
-            {activeSession?.terminalLogs.map((log, idx) => {
-              const isPrompt = log.startsWith('student@');
-              const isPass = log.includes('PASS') || log.includes('640');
-              const isFail = log.includes('FAIL') || log.includes('error');
-              const isBanner = log.startsWith('*') || log.startsWith('Linux') || log.startsWith('---');
-
-              return (
-                <div
-                  key={idx}
-                  className={`leading-relaxed whitespace-pre-wrap ${
-                    isPrompt
-                      ? 'text-emerald-400 font-semibold pt-1'
-                      : isPass
-                      ? 'text-emerald-300'
-                      : isFail
-                      ? 'text-red-400'
-                      : isBanner
-                      ? 'text-gray-400'
-                      : 'text-gray-200'
-                  }`}
+        <>
+          {activeSession && activeSession.state === 'running' && activeSession.id && activeSession.ticket ? (
+            <div className="space-y-3">
+              {/* Quick Run Action Bar */}
+              <div className="bg-[#161b22] px-3.5 py-2 rounded-xl border border-gray-800 flex items-center space-x-2 overflow-x-auto text-[11px] font-mono shadow-sm">
+                <span className="text-gray-400 flex-shrink-0 font-sans font-semibold text-xs">Quick Run:</span>
+                <button
+                  onClick={() => handleQuickRun('touch report.txt')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-blue-300 flex-shrink-0 transition-all"
                 >
-                  {log}
-                </div>
-              );
-            })}
-            <div ref={terminalEndRef} />
-          </div>
+                  touch report.txt
+                </button>
+                <button
+                  onClick={() => handleQuickRun('chmod 640 report.txt')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-emerald-300 flex-shrink-0 font-bold transition-all"
+                >
+                  chmod 640 report.txt
+                </button>
+                <button
+                  onClick={() => handleQuickRun('stat -c "%a %n" report.txt')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-amber-300 flex-shrink-0 transition-all"
+                >
+                  stat -c "%a %n" report.txt
+                </button>
+                <button
+                  onClick={() => handleQuickRun('ls -la')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-purple-300 flex-shrink-0 transition-all"
+                >
+                  ls -la
+                </button>
+                <button
+                  onClick={() => handleQuickRun('ps aux')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex-shrink-0 transition-all"
+                >
+                  ps aux
+                </button>
+                <button
+                  onClick={() => handleQuickRun('cat instructions.txt')}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex-shrink-0 transition-all"
+                >
+                  cat instructions.txt
+                </button>
+              </div>
 
-          <form
-            onSubmit={handleCommandSubmit}
-            className="p-3 bg-[#161b22] border-t border-gray-800 flex items-center space-x-2"
-          >
-            <span className="text-emerald-400 font-mono font-bold text-xs sm:text-sm flex-shrink-0">
-              student@vl-worker:~/workspace$&nbsp;
-            </span>
-            <input
-              type="text"
-              value={terminalInput}
-              onChange={e => setTerminalInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={!activeSession || activeSession.state !== 'running'}
-              placeholder={
-                activeSession?.state === 'running'
-                  ? "Type command (e.g. 'chmod 640 report.txt', 'stat -c \"%a %n\" report.txt', 'help')..."
-                  : "Start lab environment to activate shell"
-              }
-              className="flex-1 bg-transparent font-mono text-xs sm:text-sm text-white focus:outline-none placeholder-gray-600"
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={!activeSession || activeSession.state !== 'running'}
-              className="px-3 py-1 rounded bg-[#2b59ff] hover:bg-[#1e40eb] disabled:opacity-40 text-white font-mono text-xs font-semibold btn-tactile hover-lift transition-all"
-            >
-              Enter
-            </button>
-          </form>
-        </div>
+              {/* Real Interactive xterm.js Terminal with Dockerode Exec WebSocket */}
+              <RealTerminal
+                sessionId={activeSession.id}
+                ticket={activeSession.ticket}
+                containerRef={activeSession.containerRef}
+                quickCommandRef={quickCommandRef}
+                onSessionError={(err) => {
+                  console.warn('RealTerminal connection alert:', err);
+                }}
+              />
+            </div>
+          ) : activeSession && (activeSession.state === 'starting' || activeSession.state === 'queued') ? (
+            <div className="rounded-2xl border border-[#e3e6eb] bg-[#0d1117] text-white shadow-xl overflow-hidden flex flex-col items-center justify-center p-12 min-h-[500px] text-center animate-fade-in">
+              <div className="w-16 h-16 rounded-2xl bg-[#161b22] border border-gray-800 flex items-center justify-center mb-4 text-[#2b59ff]">
+                <RefreshCw className="w-8 h-8 animate-spin text-[#2b59ff]" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Provisioning Container on AWS EC2</h3>
+              <p className="text-sm text-gray-400 max-w-md mb-4 leading-relaxed font-mono">
+                Allocating hardened <code className="text-blue-400 bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800">virtuallab-linux:1.0</code> sandbox with 128 MB RAM, 0.25 vCPU, and dropped Linux capabilities...
+              </p>
+              <div className="flex items-center space-x-2 text-xs text-gray-500 font-mono">
+                <span className="w-2 h-2 rounded-full bg-[#2b59ff] animate-ping"></span>
+                <span>Negotiating authenticated WebSocket terminal ticket...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[#e3e6eb] bg-[#0d1117] text-white shadow-xl overflow-hidden flex flex-col items-center justify-center p-12 min-h-[500px] text-center">
+              <div className="w-16 h-16 rounded-2xl bg-[#161b22] border border-gray-800 flex items-center justify-center mb-4 text-[#2b59ff]">
+                <Terminal className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">No Active Container Terminal</h3>
+              <p className="text-sm text-gray-400 max-w-md mb-6 leading-relaxed">
+                Click below to dynamically provision an isolated Ubuntu container running <code className="text-blue-400 bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800">virtuallab-linux:1.0</code> on AWS EC2 and open a real interactive Bash shell with full TTY support.
+              </p>
+              <button
+                onClick={() => startLabSession(currentLab.id)}
+                className="px-6 py-2.5 rounded-xl bg-[#2b59ff] hover:bg-[#1e40eb] text-white font-semibold text-sm flex items-center space-x-2 shadow-lg hover-lift transition-all btn-tactile"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Launch Lab on AWS EC2</span>
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* TAB 2: EDITOR */}

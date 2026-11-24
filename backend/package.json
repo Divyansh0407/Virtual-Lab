@@ -1,0 +1,32 @@
+{
+  "name": "virtuallab-backend",
+  "version": "1.0.0",
+  "description": "VirtualLab AWS EC2 Docker Backend & Terminal Stream Server",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node test/sessionManager.test.js"
+  },
+  "keywords": [
+    "virtuallab",
+    "docker",
+    "dockerode",
+    "websocket",
+    "terminal",
+    "xterm"
+  ],
+  "author": "VirtualLab Project Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

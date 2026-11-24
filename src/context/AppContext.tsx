@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { labApi } from '../services/api';
 import {
   User,
   UserRole,
@@ -295,128 +296,176 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Lab Session Management
-  const startLabSession = (labId: string) => {
+  // Lab Session Management (Connected to AWS EC2 Docker Backend)
+  const startLabSession = async (labId: string) => {
     const lab = labs.find(l => l.id === labId);
     if (!lab) return;
 
-    const sessionId = `sess-${currentUser.id.substring(0, 6)}-${Date.now().toString(36)}`;
-    const containerRef = `vl-cont-${currentUser.name.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Math.floor(Math.random() * 8999 + 1000)}`;
+    setActiveLabId(labId);
+    setActiveTab('workspace');
 
-    // Initial state: QUEUED
-    const initialSession: LabSession = {
-      id: sessionId,
+    // 1. Initial State: Starting / Provisioning on AWS EC2 (without fake session ID)
+    setActiveSession({
+      id: '',
       assignmentId: `assign-${lab.id}`,
       labId: lab.id,
       studentId: currentUser.id,
       studentName: currentUser.name,
-      containerRef,
-      state: 'queued',
+      containerRef: 'Provisioning EC2 container...',
+      state: 'starting',
       startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
-      durationMinutes: 90,
-      timeRemainingSeconds: 90 * 60,
-      cpuPercent: 8,
-      memoryMB: 128,
-      maxMemoryMB: 512,
-      activePids: 4,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      durationMinutes: 30,
+      timeRemainingSeconds: 30 * 60,
+      cpuPercent: 5,
+      memoryMB: 48,
+      maxMemoryMB: 128,
+      activePids: 2,
       networkEgressBlocked: true,
+      ticket: undefined,
+      wsEndpoint: undefined,
       terminalLogs: [
-        `[VirtualLab Orchestrator] Requesting container provision for ${currentUser.name}...`,
-        `[VirtualLab Orchestrator] Security Check: Verified non-root user 'student' (UID 1001). Policy POL-RESTRICTED-NET-V1 attached.`,
-        `[VirtualLab Orchestrator] Container instance created: ${containerRef}`
+        `[VirtualLab Orchestrator] Requesting Docker container provision on AWS EC2...`,
+        `[VirtualLab Orchestrator] Target Image: virtuallab-linux:1.0 | User: student | Mem: 128MB | CPU: 0.25 vCPU`,
+        `[VirtualLab Orchestrator] Security: CapDrop: ALL, no-new-privileges: true, Network: none, tmpfs: /tmp,/run`
       ],
       files: JSON.parse(JSON.stringify(lab.starterFiles)),
       studentAnswers: {}
-    };
+    });
 
-    setActiveSession(initialSession);
-    setActiveLabId(labId);
-    setActiveTab('workspace');
+    try {
+      // 2. Call AWS EC2 backend API
+      const response = await labApi.launchLab(
+        labId,
+        currentUser.id,
+        currentUser.name,
+        currentUser.role
+      );
 
-    // Simulate transition: QUEUED -> STARTING -> RUNNING
-    setTimeout(() => {
-      setActiveSession(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          state: 'starting',
-          terminalLogs: [
-            ...prev.terminalLogs,
-            `[Container Daemon] Pulling cached image virtuallab/ubuntu-shell:22.04-hardened...`,
-            `[Container Daemon] Mounting read-only rootfs with ephemeral /home/student/workspace tmpfs...`,
-            `[Lab Gateway] Authenticated reverse proxy established on wss://gateway.virtuallab.internal/session/${containerRef}`
-          ]
-        };
+      const serverSession = response.session;
+
+      setActiveSession(prev => ({
+        ...(prev || {}),
+        id: serverSession.id,
+        assignmentId: `assign-${lab.id}`,
+        labId: lab.id,
+        studentId: currentUser.id,
+        studentName: currentUser.name,
+        containerRef: serverSession.containerName,
+        state: 'running',
+        startedAt: serverSession.startedAt,
+        expiresAt: serverSession.expiresAt,
+        durationMinutes: serverSession.durationMinutes || 30,
+        timeRemainingSeconds: serverSession.timeRemainingSeconds || 30 * 60,
+        cpuPercent: 8,
+        memoryMB: 54,
+        maxMemoryMB: 128,
+        activePids: 4,
+        networkEgressBlocked: true,
+        ticket: serverSession.ticket,
+        wsEndpoint: serverSession.wsEndpoint,
+        errorMessage: undefined,
+        terminalLogs: [
+          `[VirtualLab Orchestrator] Container ${serverSession.containerName} is live and ready on AWS EC2.`,
+          `[VirtualLab Orchestrator] WebSocket terminal stream authenticated.`
+        ],
+        files: prev?.files || JSON.parse(JSON.stringify(lab.starterFiles)),
+        studentAnswers: prev?.studentAnswers || {}
+      }));
+
+      addAuditEvent({
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+        actorRole: currentUser.role,
+        eventType: 'CONTAINER_LAUNCH',
+        targetId: serverSession.containerName,
+        description: `Container ${serverSession.containerName} dynamically created on AWS EC2 for student ${currentUser.name} (${lab.title}).`
       });
 
-      setTimeout(() => {
-        setActiveSession(prev => {
-          if (!prev) return null;
-          const welcomeBanner = [
-            `Linux vl-ubuntu-node 6.2.0-39-generic #42-Ubuntu SMP PREEMPT x86_64`,
-            ``,
-            ` * VirtualLab Academic Sandbox Environment v2.4`,
-            ` * Workload Isolation: Non-privileged rootless container`,
-            ` * Current user: student (UID: 1001, GID: 1001)`,
-            ` * Working Directory: /home/student/workspace`,
-            ` * Session Duration: 90 minutes allocated. Persistent snapshot active.`,
-            ``,
-            `Type 'help' for lab guidance or use terminal quick action buttons.`,
-            `------------------------------------------------------------------------`
-          ];
-          return {
-            ...prev,
-            state: 'running',
-            cpuPercent: 14,
-            memoryMB: 164,
-            activePids: 7,
-            terminalLogs: [...prev.terminalLogs, ...welcomeBanner]
-          };
-        });
+      setClusterMetrics(prev => ({
+        ...prev,
+        activeContainers: prev.activeContainers + 1,
+        cpuUtilization: Math.min(95, prev.cpuUtilization + 2.5)
+      }));
+    } catch (err: any) {
+      console.error('Failed to launch lab container:', err);
+      const errMsg =
+        err.message ||
+        'Failed to connect to AWS EC2 backend. Ensure backend is running on EC2 and SSH port forwarding (ssh -L 5000:localhost:5000) is active.';
 
-        addAuditEvent({
-          actorId: currentUser.id,
-          actorName: currentUser.name,
-          actorRole: currentUser.role,
-          eventType: 'CONTAINER_LAUNCH',
-          targetId: containerRef,
-          description: `Container ${containerRef} successfully provisioned and attached for student ${currentUser.name} on ${lab.title}.`
-        });
+      setActiveSession(prev => ({
+        ...(prev || {
+          id: '',
+          assignmentId: `assign-${lab.id}`,
+          labId: lab.id,
+          studentId: currentUser.id,
+          studentName: currentUser.name,
+          containerRef: 'launch-failed',
+          startedAt: new Date().toISOString(),
+          expiresAt: new Date().toISOString(),
+          durationMinutes: 30,
+          timeRemainingSeconds: 0,
+          cpuPercent: 0,
+          memoryMB: 0,
+          maxMemoryMB: 128,
+          activePids: 0,
+          networkEgressBlocked: true,
+          files: JSON.parse(JSON.stringify(lab.starterFiles)),
+          studentAnswers: {}
+        }),
+        state: 'failed',
+        errorMessage: errMsg,
+        terminalLogs: [
+          `[VirtualLab Orchestrator] ERROR: Failed to provision container on AWS EC2.`,
+          `[VirtualLab Orchestrator] Details: ${errMsg}`
+        ]
+      }));
 
-        setClusterMetrics(prev => ({
-          ...prev,
-          activeContainers: prev.activeContainers + 1,
-          cpuUtilization: Math.min(95, prev.cpuUtilization + 1.8)
-        }));
-      }, 1000);
-    }, 800);
+      addAuditEvent({
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+        actorRole: currentUser.role,
+        eventType: 'CONTAINER_STOP',
+        targetId: 'provision-failed',
+        description: `Container provision failed for ${currentUser.name}: ${errMsg}`
+      });
+    }
   };
 
-  const stopLabSession = () => {
+  const stopLabSession = async () => {
     if (!activeSession) return;
-    const ref = activeSession.containerRef;
+    const sessionToStop = activeSession;
     setActiveSession(prev => prev ? { ...prev, state: 'stopped' } : null);
+
+    try {
+      if (sessionToStop.id && sessionToStop.id.startsWith('sess_')) {
+        await labApi.stopLab(sessionToStop.id, currentUser.id, currentUser.role);
+      }
+    } catch (err) {
+      console.warn('Backend stop session notification:', err);
+    }
 
     addAuditEvent({
       actorId: currentUser.id,
       actorName: currentUser.name,
       actorRole: currentUser.role,
       eventType: 'CONTAINER_STOP',
-      targetId: ref,
-      description: `Student manually stopped session container ${ref}. Files preserved in staging volume.`
+      targetId: sessionToStop.containerRef,
+      description: `Student manually stopped session container ${sessionToStop.containerRef}. Container cleaned up on EC2.`
     });
 
     setClusterMetrics(prev => ({
       ...prev,
       activeContainers: Math.max(0, prev.activeContainers - 1),
-      cpuUtilization: Math.max(10, prev.cpuUtilization - 1.8)
+      cpuUtilization: Math.max(10, prev.cpuUtilization - 2.5)
     }));
   };
 
-  const resetLabSession = () => {
+  const resetLabSession = async () => {
     if (!activeSession) return;
-    startLabSession(activeSession.labId);
+    const labId = activeSession.labId;
+    await stopLabSession();
+    await startLabSession(labId);
   };
 
   const reconnectLabSession = () => {
