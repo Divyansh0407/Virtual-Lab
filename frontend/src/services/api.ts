@@ -27,6 +27,12 @@ export interface BackendHealthResponse {
     };
     error?: string;
   };
+  dynamoDB?: {
+    enabled: boolean;
+    connected: boolean;
+    tableName: string;
+    error?: string;
+  };
   sessions?: {
     activeCount: number;
     maxGlobalConcurrent: number;

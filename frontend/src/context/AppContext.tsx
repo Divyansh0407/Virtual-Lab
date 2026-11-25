@@ -1,29 +1,29 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { labApi } from '../services/api';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { labApi, BackendHealthResponse } from '../services/api';
 import {
   User,
   UserRole,
-  Course,
-  EnvironmentTemplate,
+  Classroom,
   Lab,
   LabSession,
   Submission,
-  AuditEvent,
-  SystemClusterMetrics,
   LabFile,
-  TestCaseResult,
-  EvaluationRun,
   Grade
 } from '../types';
 import {
   INITIAL_USERS,
-  INITIAL_COURSES,
-  INITIAL_TEMPLATES,
+  INITIAL_CLASSROOMS,
   INITIAL_LABS,
-  INITIAL_SUBMISSIONS,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_CLUSTER_METRICS
+  INITIAL_SUBMISSIONS
 } from '../data/mockData';
+
+interface BackendStatus {
+  online: boolean;
+  dockerConnected: boolean;
+  dynamoDbConnected: boolean;
+  lastChecked: string | null;
+  checking: boolean;
+}
 
 interface AppContextType {
   currentUser: User;
@@ -39,79 +39,117 @@ interface AppContextType {
   logout: () => void;
   authModalOpen: 'login' | 'signup' | null;
   setAuthModalOpen: (mode: 'login' | 'signup' | null) => void;
-  courses: Course[];
-  templates: EnvironmentTemplate[];
+
+  // Classrooms
+  classrooms: Classroom[];
+  createClassroom: (data: { name: string; code: string; section: string; description: string }) => { success: boolean; message: string; classroom?: Classroom };
+  joinClassroom: (code: string) => { success: boolean; message: string };
+
+  // Labs
   labs: Lab[];
-  submissions: Submission[];
-  auditLogs: AuditEvent[];
-  clusterMetrics: SystemClusterMetrics;
-  activeSession: LabSession | null;
+  createLab: (lab: Omit<Lab, 'id'>) => { success: boolean; labId: string };
+  deleteLab: (labId: string) => void;
   activeLabId: string;
   setActiveLabId: (labId: string) => void;
-  startLabSession: (labId: string) => void;
-  stopLabSession: () => void;
-  resetLabSession: () => void;
+
+  // Real EC2 Docker Container Session
+  activeSession: LabSession | null;
+  startLabSession: (labId: string) => Promise<void>;
+  stopLabSession: () => Promise<void>;
   reconnectLabSession: () => Promise<void>;
-  executeTerminalCommand: (cmd: string) => void;
   updateSessionFile: (fileName: string, content: string) => void;
-  createSessionFile: (fileName: string) => void;
-  saveStudentAnswer: (questionId: string, value: string) => void;
+  createSessionFile: (fileName: string, content?: string) => void;
+
+  // Submissions & Grading
+  submissions: Submission[];
   submitLab: (labId: string, answers: Record<string, string>, terminalSnapshot: string) => Submission;
-  publishGrade: (submissionId: string, finalScore: number, breakdown: Grade['breakdown'], notes: string) => void;
-  createNewLab: (lab: Lab) => void;
+  gradeSubmission: (submissionId: string, score: number, feedback: string) => void;
+
+  // System Health
+  backendStatus: BackendStatus;
+  checkBackendHealth: () => Promise<void>;
   resetToDefaultData: () => void;
-  guidedTourStep: number;
-  setGuidedTourStep: (step: number) => void;
-  showGuidedTour: boolean;
-  setShowGuidedTour: (show: boolean) => void;
-  liveContainerCount: number;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem('vl_users');
+    return saved ? JSON.parse(saved) : INITIAL_USERS;
+  });
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     return localStorage.getItem('vl_is_authenticated') === 'true';
   });
+
   const [authModalOpen, setAuthModalOpen] = useState<'login' | 'signup' | null>(null);
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('vl_current_user_id');
-    const found = INITIAL_USERS.find(u => u.id === saved);
-    return found || INITIAL_USERS[0]; // Default Divyansh Sharma
+    const savedId = localStorage.getItem('vl_current_user_id');
+    const found = users.find(u => u.id === savedId);
+    return found || users[0]; // Default student
   });
 
   const [activeTab, setActiveTab] = useState<string>(() => {
     const isAuth = localStorage.getItem('vl_is_authenticated') === 'true';
-    return isAuth ? 'dashboard' : 'landing';
+    if (!isAuth) return 'landing';
+    const role = localStorage.getItem('vl_current_role') || 'student';
+    return role === 'teacher' || role === 'faculty' ? 'classrooms' : 'dashboard';
   });
-  const [activeLabId, setActiveLabId] = useState<string>('lab-linux-perm');
-  const [courses, setCourses] = useState<Course[]>(INITIAL_COURSES);
-  const [templates, setTemplates] = useState<EnvironmentTemplate[]>(INITIAL_TEMPLATES);
+
+  const [classrooms, setClassrooms] = useState<Classroom[]>(() => {
+    const saved = localStorage.getItem('vl_classrooms');
+    return saved ? JSON.parse(saved) : INITIAL_CLASSROOMS;
+  });
+
   const [labs, setLabs] = useState<Lab[]>(() => {
     const saved = localStorage.getItem('vl_labs');
     return saved ? JSON.parse(saved) : INITIAL_LABS;
   });
+
+  const [activeLabId, setActiveLabId] = useState<string>('lab-linux-perm');
+
   const [submissions, setSubmissions] = useState<Submission[]>(() => {
     const saved = localStorage.getItem('vl_submissions');
     return saved ? JSON.parse(saved) : INITIAL_SUBMISSIONS;
   });
-  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>(() => {
-    const saved = localStorage.getItem('vl_audit_logs');
-    return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
-  });
-  const [clusterMetrics, setClusterMetrics] = useState<SystemClusterMetrics>(INITIAL_CLUSTER_METRICS);
+
   const [activeSession, setActiveSession] = useState<LabSession | null>(null);
 
-  // Guided Tour
-  const [showGuidedTour, setShowGuidedTour] = useState<boolean>(false);
-  const [guidedTourStep, setGuidedTourStep] = useState<number>(1);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>({
+    online: false,
+    dockerConnected: false,
+    dynamoDbConnected: false,
+    lastChecked: null,
+    checking: false
+  });
 
-  // Persist key state
+  // State persistence
+  useEffect(() => {
+    if (localStorage.getItem('vl_seeded_v3') !== 'true') {
+      setClassrooms(INITIAL_CLASSROOMS);
+      setLabs(INITIAL_LABS);
+      setUsers(INITIAL_USERS);
+      localStorage.setItem('vl_classrooms', JSON.stringify(INITIAL_CLASSROOMS));
+      localStorage.setItem('vl_labs', JSON.stringify(INITIAL_LABS));
+      localStorage.setItem('vl_users', JSON.stringify(INITIAL_USERS));
+      localStorage.setItem('vl_seeded_v3', 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('vl_users', JSON.stringify(users));
+  }, [users]);
+
   useEffect(() => {
     localStorage.setItem('vl_current_user_id', currentUser.id);
+    localStorage.setItem('vl_current_role', currentUser.role);
   }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem('vl_classrooms', JSON.stringify(classrooms));
+  }, [classrooms]);
 
   useEffect(() => {
     localStorage.setItem('vl_labs', JSON.stringify(labs));
@@ -121,138 +159,122 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('vl_submissions', JSON.stringify(submissions));
   }, [submissions]);
 
-  useEffect(() => {
-    localStorage.setItem('vl_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
+  // Periodic Backend Health Check
+  const checkBackendHealth = useCallback(async () => {
+    setBackendStatus(prev => ({ ...prev, checking: true }));
+    try {
+      const data: BackendHealthResponse = await labApi.checkHealth();
+      setBackendStatus({
+        online: data.status === 'ok',
+        dockerConnected: Boolean(data.docker?.connected),
+        dynamoDbConnected: Boolean(data.dynamoDB?.connected),
+        lastChecked: new Date().toLocaleTimeString(),
+        checking: false
+      });
+    } catch {
+      setBackendStatus({
+        online: false,
+        dockerConnected: false,
+        dynamoDbConnected: false,
+        lastChecked: new Date().toLocaleTimeString(),
+        checking: false
+      });
+    }
+  }, []);
 
-  // Session timer countdown effect
+  useEffect(() => {
+    checkBackendHealth();
+    const interval = setInterval(checkBackendHealth, 15000);
+    return () => clearInterval(interval);
+  }, [checkBackendHealth]);
+
+  // Active Session countdown timer
   useEffect(() => {
     if (!activeSession || activeSession.state !== 'running') return;
-
     const interval = setInterval(() => {
       setActiveSession(prev => {
         if (!prev || prev.state !== 'running') return prev;
         if (prev.timeRemainingSeconds <= 1) {
-          addAuditEvent({
-            actorId: 'system-daemon',
-            actorName: 'Session Expiry Worker',
-            actorRole: 'admin',
-            eventType: 'CONTAINER_STOP',
-            targetId: prev.containerRef,
-            description: `Session ${prev.id} expired due to duration limit reached. Container resources cleaned up.`
-          });
           return { ...prev, state: 'expired', timeRemainingSeconds: 0 };
         }
-        // slight jitter in simulated CPU/RAM
-        const cpuJitter = Math.min(100, Math.max(2, Math.floor(prev.cpuPercent + (Math.random() * 6 - 3))));
-        return {
-          ...prev,
-          timeRemainingSeconds: prev.timeRemainingSeconds - 1,
-          cpuPercent: cpuJitter
-        };
+        return { ...prev, timeRemainingSeconds: prev.timeRemainingSeconds - 1 };
       });
     }, 1000);
-
     return () => clearInterval(interval);
   }, [activeSession?.state]);
 
-  const switchUser = (userId: string) => {
-    const target = users.find(u => u.id === userId);
-    if (target) {
-      setCurrentUser(target);
-      // Sensible default tab when switching roles
-      if (target.role === 'student') {
-        setActiveTab('dashboard');
-      } else if (target.role === 'faculty') {
-        setActiveTab('grading');
-      } else if (target.role === 'admin') {
-        setActiveTab('admin');
-      }
-    }
-  };
-
-  const addAuditEvent = (event: Omit<AuditEvent, 'id' | 'timestamp'>) => {
-    const newEvent: AuditEvent = {
-      ...event,
-      id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: new Date().toISOString()
-    };
-    setAuditLogs(prev => [newEvent, ...prev]);
-  };
-
+  // User Authentication
   const login = (userId: string) => {
     const target = users.find(u => u.id === userId) || users[0];
     setCurrentUser(target);
     setIsAuthenticated(true);
     localStorage.setItem('vl_is_authenticated', 'true');
     localStorage.setItem('vl_current_user_id', target.id);
+    localStorage.setItem('vl_current_role', target.role);
 
-    // Direct user to appropriate portal based on role
-    if (target.role === 'student') {
+    if (target.role === 'teacher' || target.role === 'faculty') {
+      setActiveTab('classrooms');
+    } else {
       setActiveTab('dashboard');
-    } else if (target.role === 'faculty') {
-      setActiveTab('grading');
-    } else if (target.role === 'admin') {
-      setActiveTab('admin');
     }
-
-    addAuditEvent({
-      actorId: target.id,
-      actorName: target.name,
-      actorRole: target.role,
-      eventType: 'AUTH_LOGIN',
-      targetId: target.id,
-      description: `User ${target.name} (${target.role}) signed in successfully.`
-    });
   };
 
   const loginWithCredentials = (identifier: string, passwordInput: string): { success: boolean; error?: string } => {
     const cleanId = identifier.trim().toLowerCase();
     const cleanPass = passwordInput.trim();
 
-    if (!cleanId) {
-      return { success: false, error: 'Please enter your university email or academic ID.' };
-    }
-    if (!cleanPass) {
-      return { success: false, error: 'Please enter your password.' };
+    if (!cleanId || !cleanPass) {
+      return { success: false, error: 'Please enter both your email/ID and password.' };
     }
 
+    let normalizedId = cleanId;
+    if (cleanId === 'divyansh.sharma@university.edu') normalizedId = 'student@virtuallab.edu';
+    if (cleanId === 'garvit.dohare@university.edu') normalizedId = 'teacher@virtuallab.edu';
+
     const target = users.find(u =>
-      u.email.toLowerCase() === cleanId ||
-      u.studentId?.toLowerCase() === cleanId
+      u.email.toLowerCase() === normalizedId ||
+      u.studentId?.toLowerCase() === cleanId ||
+      u.id.toLowerCase() === cleanId
     );
 
     if (!target) {
-      return { success: false, error: 'Account not found. Please verify your email or academic ID.' };
+      return { success: false, error: 'No account found with these credentials.' };
     }
 
-    const expectedPass = target.password || 'password123';
-    const isDefaultRolePass =
-      (target.role === 'student' && cleanPass === 'student123') ||
-      (target.role === 'faculty' && cleanPass === 'faculty123') ||
-      (target.role === 'admin' && cleanPass === 'admin123');
+    const isLegacyDemoPass =
+      (target.id === 'student-1' && cleanPass === 'divyansh@123') ||
+      (target.id === 'teacher-1' && cleanPass === 'garvit@123');
 
-    if (expectedPass !== cleanPass && !isDefaultRolePass) {
-      return { success: false, error: 'Incorrect password. Please verify your credentials.' };
+    if (target.password && target.password !== cleanPass && !isLegacyDemoPass && cleanPass !== 'password123') {
+      return { success: false, error: 'Incorrect password.' };
     }
 
     login(target.id);
     return { success: true };
   };
 
-  const signup = (data: { name: string; email: string; password?: string; role: UserRole; department: string; studentId?: string }) => {
-    const newId = `user-${Date.now().toString(36)}`;
+  const signup = (data: {
+    name: string;
+    email: string;
+    password?: string;
+    role: UserRole;
+    department: string;
+    studentId?: string;
+  }) => {
+    const newId = `${data.role}-${Date.now().toString(36)}`;
+    const avatar = data.role === 'teacher' || data.role === 'faculty'
+      ? 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80'
+      : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+
     const newUser: User = {
       id: newId,
       name: data.name,
       email: data.email,
-      password: data.password || 'student123',
+      password: data.password || 'password123',
       role: data.role,
       department: data.department,
-      studentId: data.studentId,
-      avatar: data.role === 'faculty'
-        ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'
-        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=256&q=80'
+      studentId: data.studentId || (data.role === 'student' ? `STU-${Math.floor(1000 + Math.random() * 9000)}` : `FAC-${Math.floor(100 + Math.random() * 900)}`),
+      avatar
     };
 
     setUsers(prev => [newUser, ...prev]);
@@ -260,23 +282,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsAuthenticated(true);
     localStorage.setItem('vl_is_authenticated', 'true');
     localStorage.setItem('vl_current_user_id', newId);
+    localStorage.setItem('vl_current_role', newUser.role);
 
-    if (data.role === 'student') {
-      setActiveTab('dashboard');
-    } else if (data.role === 'faculty') {
-      setActiveTab('grading');
+    if (data.role === 'teacher' || data.role === 'faculty') {
+      setActiveTab('classrooms');
     } else {
-      setActiveTab('admin');
+      setActiveTab('dashboard');
     }
-
-    addAuditEvent({
-      actorId: newUser.id,
-      actorName: newUser.name,
-      actorRole: newUser.role,
-      eventType: 'AUTH_SIGNUP',
-      targetId: newId,
-      description: `New academic account created for ${newUser.name} (${newUser.email}) as ${newUser.role}.`
-    });
   };
 
   const logout = () => {
@@ -286,32 +298,108 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (activeSession) {
       stopLabSession();
     }
-    addAuditEvent({
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      eventType: 'AUTH_LOGOUT',
-      targetId: currentUser.id,
-      description: `User ${currentUser.name} signed out. Returned to landing page.`
-    });
   };
 
-  // Lab Session Management (Connected to AWS EC2 Docker Backend)
+  const switchUser = (userId: string) => {
+    login(userId);
+  };
+
+  // Classroom Management
+  const createClassroom = (data: { name: string; code: string; section: string; description: string }) => {
+    const cleanCode = data.code.trim().toUpperCase();
+    if (!data.name.trim() || !cleanCode) {
+      return { success: false, message: 'Classroom title and code are required.' };
+    }
+
+    // Check duplicate code
+    if (classrooms.some(c => c.code.toUpperCase() === cleanCode)) {
+      return { success: false, message: `Classroom code "${cleanCode}" is already in use.` };
+    }
+
+    const colors = [
+      'from-blue-600 to-indigo-700',
+      'from-emerald-600 to-teal-700',
+      'from-purple-600 to-indigo-800',
+      'from-amber-600 to-rose-700',
+      'from-cyan-600 to-blue-800'
+    ];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    const newClassroom: Classroom = {
+      id: `cls-${Date.now().toString(36)}`,
+      name: data.name.trim(),
+      code: cleanCode,
+      section: data.section.trim() || 'General Cohort',
+      teacherId: currentUser.id,
+      teacherName: currentUser.name,
+      description: data.description.trim() || 'Interactive cloud computing practical classroom.',
+      color: randomColor,
+      studentIds: [],
+      createdAt: new Date().toISOString()
+    };
+
+    setClassrooms(prev => [newClassroom, ...prev]);
+    return { success: true, message: 'Classroom created successfully!', classroom: newClassroom };
+  };
+
+  const joinClassroom = (code: string) => {
+    const cleanCode = code.trim().toUpperCase();
+    const target = classrooms.find(c => c.code.toUpperCase() === cleanCode);
+    if (!target) {
+      return { success: false, message: `No classroom found matching code "${cleanCode}".` };
+    }
+
+    if (target.studentIds.includes(currentUser.id)) {
+      return { success: false, message: `You are already enrolled in "${target.name}".` };
+    }
+
+    setClassrooms(prev =>
+      prev.map(c =>
+        c.id === target.id
+          ? { ...c, studentIds: [...c.studentIds, currentUser.id] }
+          : c
+      )
+    );
+
+    return { success: true, message: `Successfully enrolled in ${target.name}!` };
+  };
+
+  // Lab Management
+  const createLab = (labData: Omit<Lab, 'id'>) => {
+    const newId = `lab-${Date.now().toString(36)}`;
+    const classroom = classrooms.find(c => c.id === labData.classroomId);
+
+    const newLab: Lab = {
+      ...labData,
+      id: newId,
+      classroomCode: classroom?.code || '',
+      classroomName: classroom?.name || ''
+    };
+
+    setLabs(prev => [newLab, ...prev]);
+    return { success: true, labId: newId };
+  };
+
+  const deleteLab = (labId: string) => {
+    setLabs(prev => prev.filter(l => l.id !== labId));
+  };
+
+  // Real Container Lifecycle Management
   const startLabSession = async (labId: string) => {
-    const lab = labs.find(l => l.id === labId);
+    const lab = labs.find(l => l.id === labId) || labs[0];
     if (!lab) return;
 
-    setActiveLabId(labId);
+    setActiveLabId(lab.id);
     setActiveTab('workspace');
 
-    // 1. Initial State: Starting / Provisioning on AWS EC2 (without fake session ID)
+    // 1. Initial State: Starting / Provisioning on AWS EC2
     setActiveSession({
       id: '',
       assignmentId: `assign-${lab.id}`,
       labId: lab.id,
       studentId: currentUser.id,
       studentName: currentUser.name,
-      containerRef: 'Provisioning EC2 container...',
+      containerRef: 'Allocating AWS EC2 Container...',
       state: 'starting',
       startedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
@@ -322,28 +410,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       maxMemoryMB: 128,
       activePids: 2,
       networkEgressBlocked: true,
-      ticket: undefined,
-      wsEndpoint: undefined,
       terminalLogs: [
-        `[VirtualLab Orchestrator] Requesting Docker container provision on AWS EC2...`,
-        `[VirtualLab Orchestrator] Target Image: virtuallab-linux:1.0 | User: student | Mem: 128MB | CPU: 0.25 vCPU`,
-        `[VirtualLab Orchestrator] Security: CapDrop: ALL, no-new-privileges: true, Network: none, tmpfs: /tmp,/run`
+        `[VirtualLab Orchestrator] Contacting AWS EC2 backend gateway...`,
+        `[VirtualLab Orchestrator] Target Image: virtuallab-linux:1.0 | Resource Limit: 128MB RAM, 0.25 vCPU`,
+        `[VirtualLab Orchestrator] Security: Dropping all Linux capabilities; no network egress.`
       ],
-      files: JSON.parse(JSON.stringify(lab.starterFiles)),
+      files: JSON.parse(JSON.stringify(lab.starterFiles || [])),
       studentAnswers: {}
     });
 
     try {
-      // 2. Call AWS EC2 backend API
       const response = await labApi.launchLab(
-        labId,
+        lab.id,
         currentUser.id,
         currentUser.name,
         currentUser.role
       );
 
       const serverSession = response.session;
-
       setActiveSession(prev => ({
         ...(prev || {}),
         id: serverSession.id,
@@ -360,39 +444,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cpuPercent: 8,
         memoryMB: 54,
         maxMemoryMB: 128,
-        activePids: 4,
+        activePids: 3,
         networkEgressBlocked: true,
         ticket: serverSession.ticket,
         wsEndpoint: serverSession.wsEndpoint,
         errorMessage: undefined,
         terminalLogs: [
-          `[VirtualLab Orchestrator] Container ${serverSession.containerName} is live and ready on AWS EC2.`,
-          `[VirtualLab Orchestrator] WebSocket terminal stream authenticated.`
+          `[VirtualLab Orchestrator] Container ${serverSession.containerName} is live on AWS EC2.`,
+          `[VirtualLab Orchestrator] Interactive Bash TTY attached.`
         ],
-        files: prev?.files || JSON.parse(JSON.stringify(lab.starterFiles)),
+        files: prev?.files || JSON.parse(JSON.stringify(lab.starterFiles || [])),
         studentAnswers: prev?.studentAnswers || {}
       }));
-
-      addAuditEvent({
-        actorId: currentUser.id,
-        actorName: currentUser.name,
-        actorRole: currentUser.role,
-        eventType: 'CONTAINER_LAUNCH',
-        targetId: serverSession.containerName,
-        description: `Container ${serverSession.containerName} dynamically created on AWS EC2 for student ${currentUser.name} (${lab.title}).`
-      });
-
-      setClusterMetrics(prev => ({
-        ...prev,
-        activeContainers: prev.activeContainers + 1,
-        cpuUtilization: Math.min(95, prev.cpuUtilization + 2.5)
-      }));
     } catch (err: any) {
-      console.error('Failed to launch lab container:', err);
-      const errMsg =
-        err.message ||
-        'Failed to connect to AWS EC2 backend. Ensure backend is running on EC2 and SSH port forwarding (ssh -L 5000:localhost:5000) is active.';
-
+      const errMsg = err.message || 'Failed to connect to AWS EC2 backend. Check SSH tunnel on port 5001.';
       setActiveSession(prev => ({
         ...(prev || {
           id: '',
@@ -410,531 +475,124 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           maxMemoryMB: 128,
           activePids: 0,
           networkEgressBlocked: true,
-          files: JSON.parse(JSON.stringify(lab.starterFiles)),
+          files: JSON.parse(JSON.stringify(lab.starterFiles || [])),
           studentAnswers: {}
         }),
         state: 'failed',
         errorMessage: errMsg,
         terminalLogs: [
-          `[VirtualLab Orchestrator] ERROR: Failed to provision container on AWS EC2.`,
-          `[VirtualLab Orchestrator] Details: ${errMsg}`
+          `[VirtualLab Error] Could not provision container on EC2.`,
+          `[VirtualLab Error] ${errMsg}`
         ]
       }));
-
-      addAuditEvent({
-        actorId: currentUser.id,
-        actorName: currentUser.name,
-        actorRole: currentUser.role,
-        eventType: 'CONTAINER_STOP',
-        targetId: 'provision-failed',
-        description: `Container provision failed for ${currentUser.name}: ${errMsg}`
-      });
     }
   };
 
   const stopLabSession = async () => {
     if (!activeSession) return;
     const sessionToStop = activeSession;
-    setActiveSession(prev => prev ? { ...prev, state: 'stopped' } : null);
+    setActiveSession(null);
 
     try {
       if (sessionToStop.id && sessionToStop.id.startsWith('sess_')) {
         await labApi.stopLab(sessionToStop.id, currentUser.id, currentUser.role);
       }
     } catch (err) {
-      console.warn('Backend stop session notification:', err);
+      console.warn('Backend stop session notice:', err);
     }
-
-    addAuditEvent({
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      eventType: 'CONTAINER_STOP',
-      targetId: sessionToStop.containerRef,
-      description: `Student manually stopped session container ${sessionToStop.containerRef}. Container cleaned up on EC2.`
-    });
-
-    setClusterMetrics(prev => ({
-      ...prev,
-      activeContainers: Math.max(0, prev.activeContainers - 1),
-      cpuUtilization: Math.max(10, prev.cpuUtilization - 2.5)
-    }));
-  };
-
-  const resetLabSession = async () => {
-    if (!activeSession) return;
-    const labId = activeSession.labId;
-    await stopLabSession();
-    await startLabSession(labId);
   };
 
   const reconnectLabSession = async () => {
-    if (!activeSession || !activeSession.id || !activeSession.id.startsWith('sess_')) return;
+    if (!activeSession || !activeSession.id) return;
     try {
       const statusRes = await labApi.getLabStatus(activeSession.id, currentUser.id, currentUser.role);
-      if (statusRes.session?.ticket) {
+      if (statusRes.session) {
         setActiveSession(prev => prev ? {
           ...prev,
-          state: 'running',
           ticket: statusRes.session.ticket,
-          errorMessage: undefined
+          timeRemainingSeconds: statusRes.session.timeRemainingSeconds
         } : null);
       }
-    } catch (err: any) {
-      console.warn('Failed to refresh ticket for reconnection:', err);
+    } catch (err) {
+      console.warn('Failed to refresh session ticket:', err);
     }
-  };
-
-  // Real interactive terminal parser!
-  const executeTerminalCommand = (cmd: string) => {
-    if (!activeSession || activeSession.state !== 'running') return;
-    const trimmed = cmd.trim();
-    if (!trimmed) return;
-
-    const promptLine = `student@${activeSession.containerRef}:~/workspace$ ${trimmed}`;
-    let outputLines: string[] = [];
-
-    const parts = trimmed.split(' ').filter(Boolean);
-    const command = parts[0];
-    const args = parts.slice(1);
-
-    if (command === 'clear') {
-      setActiveSession(prev => prev ? { ...prev, terminalLogs: [] } : null);
-      return;
-    }
-
-    if (command === 'help') {
-      outputLines = [
-        `VirtualLab Shell v2.4 (Simulated POSIX Environment)`,
-        `Available Commands:`,
-        `  ls [-l, -la, -a]             List files and POSIX permissions`,
-        `  touch <file>                 Create empty file in workspace`,
-        `  chmod <mode> <file>          Change file permissions (e.g. chmod 640 report.txt)`,
-        `  stat [-c "%a %n"] <file>     Display file status or octal mode`,
-        `  cat <file>                   Output file contents`,
-        `  echo "text" > <file>         Write string into file`,
-        `  rm <file>                    Remove file`,
-        `  pwd                          Print working directory`,
-        `  whoami                       Display active user`,
-        `  id                           Print user/group credentials`,
-        `  python3 <file>               Execute Python script`,
-        `  pytest [-v]                  Run automated test runner`,
-        `  ps aux                       List active isolated container processes`,
-        `  df -h                        Display disk utilization`,
-        `  uptime                       Show container uptime & load average`,
-        `  clear                        Clear terminal screen`
-      ];
-    } else if (command === 'pwd') {
-      outputLines = ['/home/student/workspace'];
-    } else if (command === 'whoami') {
-      outputLines = ['student'];
-    } else if (command === 'id') {
-      outputLines = ['uid=1001(student) gid=1001(student) groups=1001(student),1002(labmembers)'];
-    } else if (command === 'uname' || (command === 'uname' && args.includes('-a'))) {
-      outputLines = ['Linux vl-container-node 6.2.0-39-generic #42-Ubuntu SMP x86_64 GNU/Linux'];
-    } else if (command === 'uptime') {
-      outputLines = [' 12:28:40 up 42 min,  1 user,  load average: 0.12, 0.08, 0.05'];
-    } else if (command === 'df' || (command === 'df' && args.includes('-h'))) {
-      outputLines = [
-        'Filesystem      Size  Used Avail Use% Mounted on',
-        '/dev/rootfs      20G  4.2G   15G  22% /',
-        'tmpfs           512M  164M  348M  32% /home/student/workspace',
-        'devtmpfs        256M     0  256M   0% /dev'
-      ];
-    } else if (command === 'ps' || (command === 'ps' && args.includes('aux'))) {
-      outputLines = [
-        'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND',
-        'student      1  0.0  0.1   8924  2412 pts/0    Ss+  12:00   0:00 /bin/bash --login',
-        'student     14  0.1  0.4  14210  4120 pts/0    S    12:05   0:00 /usr/bin/python3-agent',
-        'student     42  0.0  0.1   9104  1820 pts/0    R+   12:28   0:00 ps aux'
-      ];
-    } else if (command === 'touch') {
-      if (!args[0]) {
-        outputLines = ['touch: missing file operand'];
-      } else {
-        const fileName = args[0];
-        const existing = activeSession.files.find(f => f.name === fileName);
-        if (!existing) {
-          const newFile: LabFile = {
-            name: fileName,
-            path: `/home/student/workspace/${fileName}`,
-            content: fileName === 'report.txt' ? 'CS303 Operating Systems Audit Report\nAuthor: Student\nFile permission: Mode 640\nFindings verified.' : '',
-            isReadOnly: false
-          };
-          setActiveSession(prev => prev ? { ...prev, files: [...prev.files, newFile] } : null);
-        }
-        outputLines = [];
-      }
-    } else if (command === 'chmod') {
-      if (args.length < 2) {
-        outputLines = ['chmod: missing operand after chmod'];
-      } else {
-        const mode = args[0];
-        const fileName = args[1];
-        const targetFile = activeSession.files.find(f => f.name === fileName);
-        if (!targetFile) {
-          outputLines = [`chmod: cannot access '${fileName}': No such file or directory`];
-        } else {
-          // store permission metadata in file
-          (targetFile as any).permissions = mode;
-          outputLines = [];
-        }
-      }
-    } else if (command === 'stat') {
-      const isFormatOctal = args.includes('-c') && args.includes('%a %n');
-      const targetName = args[args.length - 1];
-      const targetFile = activeSession.files.find(f => f.name === targetName);
-
-      if (!targetFile) {
-        outputLines = [`stat: cannot stat '${targetName}': No such file or directory`];
-      } else {
-        const perms = (targetFile as any).permissions || '644';
-        if (isFormatOctal) {
-          outputLines = [`${perms} ${targetFile.name}`];
-        } else {
-          outputLines = [
-            `  File: ${targetFile.name}`,
-            `  Size: ${targetFile.content.length}       Blocks: 8          IO Block: 4096   regular file`,
-            `Device: 002bh/43d   Inode: 8941293     Links: 1`,
-            `Access: (0${perms}/-rw-r-----)  Uid: ( 1001/ student)   Gid: ( 1001/ student)`,
-            `Access: 2026-11-21 12:20:14.000000000 +0000`,
-            `Modify: 2026-11-21 12:20:14.000000000 +0000`,
-            `Change: 2026-11-21 12:20:14.000000000 +0000`
-          ];
-        }
-      }
-    } else if (command === 'ls') {
-      const isLong = args.includes('-l') || args.includes('-la') || args.includes('-al');
-      if (isLong) {
-        outputLines = ['total ' + (activeSession.files.length * 4)];
-        activeSession.files.forEach(f => {
-          const perms = (f as any).permissions || (f.name === 'report.txt' ? '640' : '644');
-          const permStr = perms === '640' ? '-rw-r-----' : perms === '777' ? '-rwxrwxrwx' : '-rw-r--r--';
-          outputLines.push(`${permStr} 1 student student ${f.content.length.toString().padStart(4, ' ')} Nov 21 12:20 ${f.name}`);
-        });
-      } else {
-        outputLines = [activeSession.files.map(f => f.name).join('   ')];
-      }
-    } else if (command === 'cat') {
-      if (!args[0]) {
-        outputLines = ['cat: missing operand'];
-      } else {
-        const target = activeSession.files.find(f => f.name === args[0]);
-        if (!target) {
-          outputLines = [`cat: ${args[0]}: No such file or directory`];
-        } else {
-          outputLines = target.content ? target.content.split('\n') : ['(empty file)'];
-        }
-      }
-    } else if (command === 'python3') {
-      if (args[0] === '--version') {
-        outputLines = ['Python 3.11.8 (main, Feb 2026, 14:12:00) [GCC 12.3.0] on linux'];
-      } else if (args[0] === 'scheduler.py') {
-        outputLines = [
-          `[VirtualLab Python Runtime] Running scheduler.py...`,
-          `Simulating Round Robin with Quantum q=3 on 3 processes...`,
-          `PID P1: Completed at t=12, Wait Time: 7`,
-          `PID P2: Completed at t=6,  Wait Time: 3`,
-          `PID P3: Completed at t=16, Wait Time: 8`,
-          `Average Turnaround Time (ATT): 11.33 ms`,
-          `Average Waiting Time (AWT):    6.00 ms`,
-          `Simulation complete. Execution time: 0.04s`
-        ];
-      } else {
-        outputLines = [`[Python 3.11] Executed ${args[0]} successfully (Exit code: 0)`];
-      }
-    } else if (command === 'pytest') {
-      outputLines = [
-        `============================= test session starts ==============================`,
-        `platform linux -- Python 3.11.8, pytest-7.4.3, pluggy-1.3.0`,
-        `rootdir: /home/student/workspace`,
-        `collected 2 items`,
-        ``,
-        `test_scheduler.py::test_single_process PASSED                            [ 50%]`,
-        `test_scheduler.py::test_multiple_processes PASSED                        [100%]`,
-        ``,
-        `============================== 2 passed in 0.18s ===============================`
-      ];
-    } else if (command === 'echo') {
-      const fullCmd = trimmed;
-      if (fullCmd.includes('>')) {
-        const match = fullCmd.match(/echo\s+["']?([^"'>]+)["']?\s*>\s*([^\s]+)/);
-        if (match) {
-          const text = match[1];
-          const fileName = match[2];
-          const file = activeSession.files.find(f => f.name === fileName);
-          if (file) {
-            file.content = text;
-          } else {
-            activeSession.files.push({
-              name: fileName,
-              path: `/home/student/workspace/${fileName}`,
-              content: text,
-              isReadOnly: false
-            });
-          }
-          outputLines = [];
-        }
-      } else {
-        outputLines = [args.join(' ')];
-      }
-    } else {
-      outputLines = [`bash: ${command}: command not found. Type 'help' for available lab commands.`];
-    }
-
-    setActiveSession(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        terminalLogs: [...prev.terminalLogs, promptLine, ...outputLines]
-      };
-    });
   };
 
   const updateSessionFile = (fileName: string, content: string) => {
     setActiveSession(prev => {
       if (!prev) return null;
-      const updated = prev.files.map(f => f.name === fileName ? { ...f, content } : f);
-      return { ...prev, files: updated };
+      const files = prev.files.map(f => f.name === fileName ? { ...f, content } : f);
+      if (!files.some(f => f.name === fileName)) {
+        files.push({ name: fileName, path: `/home/student/${fileName}`, content, isReadOnly: false });
+      }
+      return { ...prev, files };
     });
   };
 
-  const createSessionFile = (fileName: string) => {
+  const createSessionFile = (fileName: string, content = '') => {
     setActiveSession(prev => {
       if (!prev) return null;
       if (prev.files.some(f => f.name === fileName)) return prev;
-      const newFile: LabFile = {
-        name: fileName,
-        path: `/home/student/workspace/${fileName}`,
-        content: '',
-        isReadOnly: false
-      };
-      return { ...prev, files: [...prev.files, newFile] };
-    });
-  };
-
-  const saveStudentAnswer = (questionId: string, value: string) => {
-    setActiveSession(prev => {
-      if (!prev) return null;
       return {
         ...prev,
-        studentAnswers: {
-          ...prev.studentAnswers,
-          [questionId]: value
-        }
+        files: [...prev.files, { name: fileName, path: `/home/student/${fileName}`, content, isReadOnly: false }]
       };
     });
   };
 
-  // Lab Submission & Automated/AI Evaluation Engine
+  // Lab Submission & Grading
   const submitLab = (labId: string, answers: Record<string, string>, terminalSnapshot: string): Submission => {
     const lab = labs.find(l => l.id === labId);
-    if (!lab || !activeSession) throw new Error('No active lab session');
+    const classroom = classrooms.find(c => c.id === lab?.classroomId);
 
-    // 1. Generate sha256 checksum artifact
-    const artifactDigest = `sha256:${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
-    const subId = `sub-${currentUser.id}-${Date.now().toString(36)}`;
-
-    // 2. Perform Automated Objective Checks
-    const testCases: TestCaseResult[] = [];
-    let objectiveEarned = 0;
-
-    if (labId === 'lab-linux-perm') {
-      const reportFile = activeSession.files.find(f => f.name === 'report.txt');
-      const fileExists = Boolean(reportFile);
-      const perms = (reportFile as any)?.permissions || '640';
-      const is640 = perms === '640';
-
-      testCases.push({
-        id: 'tc-auto-1',
-        title: 'File Existence Check: /home/student/workspace/report.txt',
-        status: fileExists ? 'pass' : 'fail',
-        pointsEarned: fileExists ? 3 : 0,
-        maxPoints: 3,
-        outputLog: fileExists
-          ? `PASS: report.txt exists in staging volume (${reportFile?.content.length || 0} bytes).`
-          : `FAIL: File /home/student/workspace/report.txt not found.`
-      });
-
-      testCases.push({
-        id: 'tc-auto-2',
-        title: 'Permission Mask Verification: Exact octal mode 640 (-rw-r-----)',
-        status: is640 ? 'pass' : 'fail',
-        pointsEarned: is640 ? 3 : 0,
-        maxPoints: 3,
-        outputLog: is640
-          ? `PASS: stat -c "%a" returned 640. User rw-, Group r--, Other --- verified.`
-          : `FAIL: Expected mode 640, found ${perms}.`
-      });
-
-      objectiveEarned = testCases.reduce((acc, tc) => acc + tc.pointsEarned, 0);
-    } else {
-      // Default positive test cases
-      testCases.push({
-        id: 'tc-gen-1',
-        title: 'Unit Test Suite Execution',
-        status: 'pass',
-        pointsEarned: 6,
-        maxPoints: 6,
-        outputLog: 'Automated test suite passed 2/2 tests without errors.'
-      });
-      objectiveEarned = 6;
-    }
-
-    // 3. AI-Assisted Feedback Generator
-    const q1Answer = answers['q1'] || '';
-    const hasOctalExplanation = q1Answer.toLowerCase().includes('owner') || q1Answer.toLowerCase().includes('group');
-    const hasSecurityReasoning = q1Answer.toLowerCase().includes('read') || q1Answer.toLowerCase().includes('least privilege') || q1Answer.toLowerCase().includes('confidential');
-
-    let aiExplanationScore = 1.5;
-    if (hasOctalExplanation && hasSecurityReasoning) {
-      aiExplanationScore = 2.0;
-    } else if (hasOctalExplanation || hasSecurityReasoning) {
-      aiExplanationScore = 1.0;
-    } else {
-      aiExplanationScore = 0.5;
-    }
-
-    const aiFeedback = {
-      suggestedExplanationScore: aiExplanationScore,
-      maxExplanationScore: 2.0,
-      clarityScore: hasSecurityReasoning ? 9 : 6,
-      technicalAccuracyScore: hasOctalExplanation ? 9 : 5,
-      summary: hasOctalExplanation
-        ? `Solid technical explanation demonstrating clear grasp of octal bit masks and confidentiality protection.`
-        : `Explanation lacks precision on how numeric octals (6, 4, 0) translate into read/write/execute flags.`,
-      strengths: [
-        'Clear identification of owner and group isolation roles.',
-        'Practical articulation of why mode 640 prevents unauthorized read leaks compared to mode 644.'
-      ],
-      improvementSuggestions: [
-        'Mention the concept of umask in automated file provisioning.',
-        'Detail whether execute (x=1) permissions are ever appropriate for non-binary text files.'
-      ],
-      isAdvisory: true
-    };
-
-    const evaluation: EvaluationRun = {
-      id: `eval-${subId}`,
-      submissionId: subId,
-      status: 'completed',
-      objectiveScore: objectiveEarned,
-      objectiveMaxScore: 6,
-      testCases,
-      aiFeedback,
-      totalSuggestedScore: objectiveEarned + aiExplanationScore + 1.8,
-      runAt: new Date().toISOString()
-    };
-
-    const newSubmission: Submission = {
-      id: subId,
-      sessionId: activeSession.id,
-      labId: lab.id,
+    const newSub: Submission = {
+      id: `sub-${Date.now().toString(36)}`,
+      labId,
+      labTitle: lab?.title || 'Lab Practical',
+      classroomId: classroom?.id || '',
+      classroomName: classroom?.name || 'Classroom',
       studentId: currentUser.id,
       studentName: currentUser.name,
-      courseCode: lab.courseCode,
-      labTitle: lab.title,
-      attemptNo: 1,
       submittedAt: new Date().toISOString(),
-      artifactRef: artifactDigest,
-      filesSnapshot: JSON.parse(JSON.stringify(activeSession.files)),
       answers,
       terminalSnapshot,
-      evaluation,
-      status: 'reviewed'
+      filesSnapshot: activeSession?.files || [],
+      status: 'submitted'
     };
 
-    setSubmissions(prev => [newSubmission, ...prev]);
-
-    // Audit logs
-    addAuditEvent({
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      eventType: 'SUBMISSION_SNAPSHOT',
-      targetId: subId,
-      description: `Immutable submission snapshot ${subId} captured with SHA-256 hash ${artifactDigest.substring(0, 19)}...`
-    });
-
-    addAuditEvent({
-      actorId: 'evaluation-engine',
-      actorName: 'Automated Test Runner',
-      actorRole: 'admin',
-      eventType: 'AUTO_EVALUATION',
-      targetId: evaluation.id,
-      description: `Objective test suite completed: ${testCases.filter(t => t.status === 'pass').length}/${testCases.length} passed (${objectiveEarned}/6 pts).`
-    });
-
-    addAuditEvent({
-      actorId: 'ai-evaluator-adapter',
-      actorName: 'AI Evaluation Assistant',
-      actorRole: 'admin',
-      eventType: 'AI_FEEDBACK_GENERATED',
-      targetId: evaluation.id,
-      description: `Advisory rubric feedback generated for student ${currentUser.name}. Suggested explanation score: ${aiExplanationScore}/2.0.`
-    });
-
-    return newSubmission;
+    setSubmissions(prev => [newSub, ...prev.filter(s => !(s.labId === labId && s.studentId === currentUser.id))]);
+    return newSub;
   };
 
-  const publishGrade = (
-    submissionId: string,
-    finalScore: number,
-    breakdown: Grade['breakdown'],
-    notes: string
-  ) => {
-    const existing = submissions.find(s => s.id === submissionId);
-    if (!existing) return;
-
-    const grade: Grade = {
-      id: `grd-${submissionId}`,
-      submissionId,
-      reviewerId: currentUser.id,
-      reviewerName: currentUser.name,
-      finalScore,
-      maxScore: 10,
-      breakdown,
-      facultyNotes: notes,
-      publishedAt: new Date().toISOString(),
-      status: 'published'
-    };
-
+  const gradeSubmission = (submissionId: string, score: number, feedback: string) => {
     setSubmissions(prev =>
-      prev.map(s => s.id === submissionId ? { ...s, grade, status: 'published' } : s)
+      prev.map(s => {
+        if (s.id !== submissionId) return s;
+        return {
+          ...s,
+          status: 'graded',
+          grade: {
+            score,
+            maxScore: 10,
+            feedback,
+            gradedAt: new Date().toISOString(),
+            gradedBy: currentUser.name
+          }
+        };
+      })
     );
-
-    addAuditEvent({
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      eventType: 'GRADE_PUBLISH',
-      targetId: submissionId,
-      description: `Instructor ${currentUser.name} officially published final grade ${finalScore}/10 for submission ${submissionId}.`
-    });
-  };
-
-  const createNewLab = (newLab: Lab) => {
-    setLabs(prev => [newLab, ...prev]);
-    addAuditEvent({
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      eventType: 'SECURITY_CHECK',
-      targetId: newLab.id,
-      description: `New practical lab created: '${newLab.title}' under course ${newLab.courseCode}. Template: ${newLab.templateId}.`
-    });
   };
 
   const resetToDefaultData = () => {
     localStorage.clear();
+    setUsers(INITIAL_USERS);
+    setClassrooms(INITIAL_CLASSROOMS);
     setLabs(INITIAL_LABS);
     setSubmissions(INITIAL_SUBMISSIONS);
-    setAuditLogs(INITIAL_AUDIT_LOGS);
     setActiveSession(null);
     setCurrentUser(INITIAL_USERS[0]);
-    setIsAuthenticated(false);
-    setActiveTab('landing');
-    setGuidedTourStep(1);
+    setIsAuthenticated(true);
+    setActiveTab('dashboard');
   };
 
   return (
@@ -953,32 +611,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logout,
         authModalOpen,
         setAuthModalOpen,
-        courses,
-        templates,
+        classrooms,
+        createClassroom,
+        joinClassroom,
         labs,
-        submissions,
-        auditLogs,
-        clusterMetrics,
-        activeSession,
+        createLab,
+        deleteLab,
         activeLabId,
         setActiveLabId,
+        activeSession,
         startLabSession,
         stopLabSession,
-        resetLabSession,
         reconnectLabSession,
-        executeTerminalCommand,
         updateSessionFile,
         createSessionFile,
-        saveStudentAnswer,
+        submissions,
         submitLab,
-        publishGrade,
-        createNewLab,
-        resetToDefaultData,
-        guidedTourStep,
-        setGuidedTourStep,
-        showGuidedTour,
-        setShowGuidedTour,
-        liveContainerCount: clusterMetrics.activeContainers + (activeSession?.state === 'running' ? 1 : 0)
+        gradeSubmission,
+        backendStatus,
+        checkBackendHealth,
+        resetToDefaultData
       }}
     >
       {children}
@@ -988,6 +640,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useApp = () => {
   const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within an AppProvider');
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
   return context;
 };

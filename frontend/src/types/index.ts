@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'faculty' | 'admin';
+export type UserRole = 'student' | 'teacher' | 'faculty' | 'admin';
 
 export interface User {
   id: string;
@@ -11,40 +11,17 @@ export interface User {
   department: string;
 }
 
-export interface Course {
-  id: string;
-  code: string;
-  title: string;
-  term: string;
-  instructorId: string;
-  instructorName: string;
-  description: string;
-  studentCount: number;
-  color: string;
-}
-
-export interface EnvironmentTemplate {
+export interface Classroom {
   id: string;
   name: string;
-  approvedImage: string;
-  tag: string;
-  category: 'Linux Shell' | 'Python' | 'C/C++' | 'Data Science';
-  cpuLimit: string;
-  memoryLimitMB: number;
-  timeoutMinutes: number;
-  nonRootUser: string;
-  isVerified: boolean;
-  policyId: string;
+  code: string; // Join code for students, e.g. "OS-2026", "CS-303"
+  section: string;
+  teacherId: string;
+  teacherName: string;
   description: string;
-}
-
-export interface LabQuestion {
-  id: string;
-  prompt: string;
-  type: 'code' | 'explanation' | 'terminal_evidence';
-  maxPoints: number;
-  criteria: string;
-  placeholder?: string;
+  color: string; // Tailwind gradient class
+  studentIds: string[]; // Enrolled students
+  createdAt: string;
 }
 
 export interface LabFile {
@@ -54,23 +31,30 @@ export interface LabFile {
   isReadOnly?: boolean;
 }
 
+export interface LabQuestion {
+  id: string;
+  prompt: string;
+  type: 'code' | 'explanation' | 'terminal_evidence';
+  maxPoints: number;
+  criteria: string;
+}
+
 export interface Lab {
   id: string;
-  courseId: string;
-  courseCode: string;
+  classroomId: string;
+  classroomCode?: string;
+  classroomName?: string;
   title: string;
   shortDescription: string;
-  instructions: string; // Markdown / structured guide
+  instructions: string; // Markdown / task instructions
   prerequisites: string[];
-  templateId: string;
-  version: string;
-  status: 'draft' | 'published' | 'archived';
   dueAt: string;
   totalPoints: number;
   maxAttempts: number;
   starterFiles: LabFile[];
   questions: LabQuestion[];
-  verificationScript: string; // automated check definition
+  verificationScript?: string;
+  status: 'published' | 'draft';
 }
 
 export type SessionState = 'queued' | 'starting' | 'running' | 'stopped' | 'failed' | 'expired';
@@ -100,96 +84,48 @@ export interface LabSession {
   errorMessage?: string;
 }
 
-export interface TestCaseResult {
-  id: string;
-  title: string;
-  status: 'pass' | 'fail';
-  pointsEarned: number;
-  maxPoints: number;
-  outputLog?: string;
-}
-
-export interface EvaluationRun {
-  id: string;
-  submissionId: string;
-  status: 'completed' | 'running' | 'failed';
-  objectiveScore: number;
-  objectiveMaxScore: number;
-  testCases: TestCaseResult[];
-  aiFeedback?: {
-    suggestedExplanationScore: number;
-    maxExplanationScore: number;
-    clarityScore: number;
-    technicalAccuracyScore: number;
-    summary: string;
-    strengths: string[];
-    improvementSuggestions: string[];
-    isAdvisory: boolean;
-  };
-  totalSuggestedScore: number;
-  runAt: string;
-}
-
 export interface Grade {
-  id: string;
-  submissionId: string;
-  reviewerId: string;
-  reviewerName: string;
-  finalScore: number;
+  score: number;
   maxScore: number;
-  breakdown: {
-    automatedCheckPoints: number;
-    writtenExplanationPoints: number;
-    evidenceCompletenessPoints: number;
-  };
-  facultyNotes: string;
-  publishedAt: string | null;
-  status: 'draft' | 'published';
+  feedback: string;
+  gradedAt: string;
+  gradedBy: string;
 }
 
 export interface Submission {
   id: string;
-  sessionId: string;
   labId: string;
+  labTitle: string;
+  classroomId: string;
+  classroomName: string;
   studentId: string;
   studentName: string;
-  courseCode: string;
-  labTitle: string;
-  attemptNo: number;
   submittedAt: string;
-  artifactRef: string; // SHA-256 hash
-  filesSnapshot: LabFile[];
   answers: Record<string, string>;
   terminalSnapshot: string;
-  evaluation?: EvaluationRun;
+  filesSnapshot: LabFile[];
   grade?: Grade;
-  status: 'submitted' | 'evaluating' | 'reviewed' | 'published';
+  status: 'submitted' | 'graded';
 }
 
-export interface AuditEvent {
+export interface Course extends Classroom {
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  studentCount: number;
+  term?: string;
+}
+
+export interface EnvironmentTemplate {
   id: string;
-  timestamp: string;
-  actorId: string;
-  actorName: string;
-  actorRole: UserRole;
-  eventType: 'CONTAINER_LAUNCH' | 'CONTAINER_STOP' | 'SUBMISSION_SNAPSHOT' | 'AUTO_EVALUATION' | 'AI_FEEDBACK_GENERATED' | 'GRADE_OVERRIDE' | 'GRADE_PUBLISH' | 'SECURITY_CHECK' | 'AUTH_LOGIN' | 'AUTH_SIGNUP' | 'AUTH_LOGOUT';
-  targetId: string;
+  name: string;
+  approvedImage: string;
+  tag: string;
+  category: string;
+  cpuLimit: string;
+  memoryLimitMB: number;
+  timeoutMinutes: number;
+  nonRootUser: string;
+  isVerified: boolean;
   description: string;
-  metadata?: Record<string, any>;
-}
-
-export interface SystemClusterMetrics {
-  hostName: string;
-  hostIp: string;
-  osKernel: string;
-  dockerVersion: string;
-  activeContainers: number;
-  maxContainerCapacity: number;
-  cpuUtilization: number;
-  memoryUsedGB: number;
-  memoryTotalGB: number;
-  diskUsedGB: number;
-  diskTotalGB: number;
-  queuedLaunches: number;
-  networkStatus: 'Normal' | 'Degraded' | 'Throttled';
 }
